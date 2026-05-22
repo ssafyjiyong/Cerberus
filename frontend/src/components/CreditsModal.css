@@ -1,0 +1,198 @@
+/* ====== Credits Modal (Easter Egg) ====== */
+.credits-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  cursor: pointer;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(26, 10, 46, 0.88) 0%,
+    rgba(5, 3, 12, 0.97) 90%
+  );
+  backdrop-filter: blur(3px);
+  animation: credits-fade-in 0.3s ease-out;
+}
+
+@keyframes credits-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Cabinet panel */
+.credits-modal__cabinet {
+  position: relative;
+  width: min(540px, 92vw);
+  padding: var(--space-2xl) var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-lg);
+  text-align: center;
+  cursor: default;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    rgba(26, 10, 46, 0.98) 0%,
+    rgba(10, 6, 26, 0.99) 100%
+  );
+  border: 3px solid var(--color-neon-purple);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glow-purple), inset 0 0 40px rgba(204, 68, 255, 0.12);
+  animation: credits-pop-in 0.45s cubic-bezier(0.2, 1.1, 0.4, 1);
+}
+
+@keyframes credits-pop-in {
+  from { opacity: 0; transform: scale(0.8) translateY(30px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Moving scanline inside the cabinet */
+.credits-modal__scanline {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 60px;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(0, 204, 255, 0.13),
+    transparent
+  );
+  animation: scanline-move 4s linear infinite;
+}
+
+/* Konami unlock badge */
+.credits-modal__badge {
+  font-family: var(--font-pixel);
+  font-size: clamp(6px, 1.3vw, 9px);
+  color: var(--color-neon-green);
+  text-shadow: var(--glow-green);
+  letter-spacing: 1px;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-neon-green);
+  animation: blink 1.4s step-end infinite;
+}
+
+/* Three heads of Cerberus */
+.credits-modal__heads {
+  display: flex;
+  gap: var(--space-md);
+  font-size: clamp(28px, 7vw, 44px);
+}
+
+.credits-modal__head {
+  filter: drop-shadow(0 0 8px rgba(255, 68, 68, 0.7));
+  animation: float 2.4s ease-in-out infinite;
+}
+
+.credits-modal__head:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.credits-modal__head:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+/* Title */
+.credits-modal__title {
+  font-family: var(--font-pixel);
+  font-size: clamp(12px, 2.6vw, 18px);
+  color: var(--color-fire-yellow);
+  text-shadow: 0 0 10px rgba(255, 204, 0, 0.8), 0 0 24px rgba(255, 136, 0, 0.5);
+  letter-spacing: 3px;
+}
+
+/* Credit roll */
+.credits-modal__roll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) 0;
+}
+
+.credits-modal__label {
+  font-family: var(--font-pixel);
+  font-size: clamp(7px, 1.3vw, 9px);
+  color: var(--color-neon-blue);
+  text-shadow: var(--glow-blue);
+  letter-spacing: 2px;
+}
+
+.credits-modal__name {
+  font-family: var(--font-pixel);
+  font-size: clamp(22px, 6vw, 38px);
+  color: var(--color-fire-red);
+  letter-spacing: 4px;
+  animation: fire-flicker 0.6s ease-in-out infinite;
+}
+
+.credits-modal__name-sub {
+  font-family: var(--font-pixel);
+  font-size: clamp(8px, 1.6vw, 11px);
+  color: var(--text-secondary);
+  letter-spacing: 3px;
+}
+
+/* Divider */
+.credits-modal__divider {
+  font-family: var(--font-pixel);
+  font-size: clamp(7px, 1.3vw, 10px);
+  color: var(--color-neon-purple);
+  text-shadow: var(--glow-purple);
+}
+
+/* Game title */
+.credits-modal__game {
+  font-family: var(--font-pixel);
+  font-size: clamp(9px, 1.8vw, 13px);
+  color: var(--color-fire-orange);
+  text-shadow: var(--glow-orange);
+  letter-spacing: 2px;
+  line-height: 1.8;
+}
+
+.credits-modal__game span {
+  color: var(--text-secondary);
+  font-size: 0.78em;
+}
+
+.credits-modal__thanks {
+  font-family: var(--font-pixel);
+  font-size: clamp(7px, 1.3vw, 9px);
+  color: var(--color-neon-green);
+  text-shadow: var(--glow-green);
+  letter-spacing: 2px;
+  animation: blink 1.2s step-end infinite;
+}
+
+/* Close button */
+.credits-modal__close {
+  font-family: var(--font-pixel);
+  font-size: clamp(7px, 1.3vw, 9px);
+  margin-top: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  color: var(--color-fire-yellow);
+  background: none;
+  border: 2px solid var(--color-fire-yellow);
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.2s ease;
+}
+
+.credits-modal__close:hover {
+  background: rgba(255, 204, 0, 0.12);
+  box-shadow: var(--glow-orange);
+  transform: scale(1.05);
+}
+
+.credits-modal__close:active {
+  transform: scale(0.98);
+}

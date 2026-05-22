@@ -1,0 +1,83 @@
+/* ====== Game Over Screen ====== */
+.gameover-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  background: radial-gradient(ellipse at center, rgba(255, 0, 68, 0.08) 0%, var(--bg-deep-dark) 70%);
+  padding: var(--space-xl);
+}
+
+.gameover-screen__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xl);
+  animation: slide-up 0.6s ease-out forwards;
+}
+
+.gameover-screen__title {
+  font-family: var(--font-pixel);
+  font-size: clamp(28px, 6vw, 56px);
+  color: var(--color-fire-red);
+  text-shadow:
+    0 0 20px rgba(255, 0, 68, 0.9),
+    0 0 40px rgba(255, 0, 68, 0.6),
+    0 0 80px rgba(255, 0, 68, 0.3);
+  letter-spacing: 6px;
+  animation: blink 1.5s step-end infinite;
+  text-align: center;
+}
+
+.gameover-screen__reason {
+  font-family: var(--font-pixel);
+  font-size: clamp(9px, 1.5vw, 12px);
+  color: var(--color-fire-orange);
+  text-shadow: var(--glow-orange);
+  text-align: center;
+  line-height: 2;
+}
+
+.gameover-screen__stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+  max-width: 400px;
+}
+
+.gameover-screen__stat {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(10, 10, 26, 0.6);
+  border: 1px solid var(--border-purple);
+}
+
+.gameover-screen__stat-label {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+.gameover-screen__stat-value {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: var(--color-fire-red);
+  text-shadow: var(--glow-red);
+}
+
+.gameover-screen__skull {
+  font-size: 64px;
+  animation: float 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 20px rgba(255, 0, 68, 0.5));
+}
+
+.gameover-screen__actions {
+  display: flex;
+  gap: var(--space-md);
+}

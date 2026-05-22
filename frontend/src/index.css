@@ -1,0 +1,372 @@
+/* ============================================================
+   CERBERUS: THE DARK AUDITOR - 고전 아케이드 디자인 시스템
+   ============================================================ */
+
+/* Google Fonts - Press Start 2P (픽셀 폰트) */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+
+/* ====== CSS Variables (Design Tokens) ====== */
+:root {
+  /* Color Palette - 지옥/용암 테마 */
+  --bg-deep-dark: #0a0a1a;
+  --bg-dark-purple: #1a0a2e;
+  --bg-panel: #12082a;
+  --bg-chat: #0d0620;
+
+  --color-fire-red: #ff4444;
+  --color-fire-orange: #ff8800;
+  --color-fire-yellow: #ffcc00;
+  --color-lava: #e63900;
+  --color-neon-green: #00ff88;
+  --color-neon-red: #ff0044;
+  --color-neon-blue: #00ccff;
+  --color-neon-purple: #cc44ff;
+
+  --border-purple: #4a2a6a;
+  --border-red: #ff4444;
+  --border-frame: #6a3a8a;
+
+  --text-primary: #f0e6ff;
+  --text-secondary: #a088c0;
+  --text-dim: #6a5a80;
+
+  /* Typography */
+  --font-pixel: 'Press Start 2P', cursive;
+  --font-ui: 'Noto Sans KR', sans-serif;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows & Glows */
+  --glow-red: 0 0 10px rgba(255, 68, 68, 0.5), 0 0 20px rgba(255, 68, 68, 0.3);
+  --glow-green: 0 0 10px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.3);
+  --glow-orange: 0 0 10px rgba(255, 136, 0, 0.5), 0 0 20px rgba(255, 136, 0, 0.3);
+  --glow-blue: 0 0 10px rgba(0, 204, 255, 0.5), 0 0 20px rgba(0, 204, 255, 0.3);
+  --glow-purple: 0 0 10px rgba(204, 68, 255, 0.5), 0 0 20px rgba(204, 68, 255, 0.3);
+
+  /* Arcade frame */
+  --frame-border: 3px solid var(--border-frame);
+  --frame-inner-border: 2px solid var(--border-red);
+}
+
+/* ====== Reset & Global Styles ====== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-deep-dark);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ====== CRT Scanline Overlay ====== */
+.crt-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.08) 0px,
+    rgba(0, 0, 0, 0.08) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* ====== Arcade Cabinet Frame ====== */
+.arcade-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a0a30 0%, #0a0a1a 50%, #1a0a30 100%);
+  border: 4px solid #2a1a4a;
+  box-shadow:
+    inset 0 0 30px rgba(106, 58, 138, 0.3),
+    0 0 40px rgba(106, 58, 138, 0.2);
+  overflow: hidden;
+}
+
+.arcade-frame::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(255, 68, 68, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 50%, rgba(204, 68, 255, 0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Circuit board pattern on frame edges */
+.arcade-frame::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  border: var(--frame-inner-border);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ====== Neon Text Effects ====== */
+.neon-text-red {
+  color: var(--color-fire-red);
+  text-shadow: var(--glow-red);
+}
+
+.neon-text-green {
+  color: var(--color-neon-green);
+  text-shadow: var(--glow-green);
+}
+
+.neon-text-orange {
+  color: var(--color-fire-orange);
+  text-shadow: var(--glow-orange);
+}
+
+.neon-text-blue {
+  color: var(--color-neon-blue);
+  text-shadow: var(--glow-blue);
+}
+
+.neon-text-purple {
+  color: var(--color-neon-purple);
+  text-shadow: var(--glow-purple);
+}
+
+/* ====== Pixel Font Utility ====== */
+.pixel-text {
+  font-family: var(--font-pixel);
+  letter-spacing: 1px;
+}
+
+/* ====== Animations ====== */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+@keyframes fire-flicker {
+  0%, 100% { text-shadow: 0 0 10px rgba(255, 68, 68, 0.8), 0 0 20px rgba(255, 136, 0, 0.6); }
+  25% { text-shadow: 0 0 15px rgba(255, 136, 0, 0.9), 0 0 30px rgba(255, 68, 68, 0.7); }
+  50% { text-shadow: 0 0 8px rgba(255, 204, 0, 0.8), 0 0 25px rgba(255, 136, 0, 0.5); }
+  75% { text-shadow: 0 0 12px rgba(255, 68, 68, 0.9), 0 0 22px rgba(255, 204, 0, 0.6); }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+@keyframes typewriter {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+@keyframes scanline-move {
+  0% { top: -10%; }
+  100% { top: 110%; }
+}
+
+@keyframes coin-insert {
+  0% { transform: translateY(-30px); opacity: 0; }
+  50% { transform: translateY(5px); opacity: 1; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes stage-clear-flash {
+  0% { background-color: transparent; }
+  25% { background-color: rgba(0, 255, 136, 0.3); }
+  50% { background-color: transparent; }
+  75% { background-color: rgba(0, 255, 136, 0.2); }
+  100% { background-color: transparent; }
+}
+
+@keyframes score-count-up {
+  from { transform: scale(1); }
+  to { transform: scale(1.1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.blink {
+  animation: blink 1s step-end infinite;
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.fire-flicker {
+  animation: fire-flicker 0.5s ease-in-out infinite;
+}
+
+.slide-up {
+  animation: slide-up 0.5s ease-out forwards;
+}
+
+.float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ====== Arcade Button Styles ====== */
+.arcade-btn {
+  font-family: var(--font-pixel);
+  font-size: 12px;
+  padding: var(--space-md) var(--space-xl);
+  border: 3px solid var(--color-fire-red);
+  background: linear-gradient(180deg, #2a0a1a 0%, #1a0610 100%);
+  color: var(--color-fire-red);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  box-shadow: var(--glow-red);
+}
+
+.arcade-btn:hover {
+  background: linear-gradient(180deg, #3a1a2a 0%, #2a0a1a 100%);
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(255, 68, 68, 0.8), 0 0 40px rgba(255, 68, 68, 0.4);
+}
+
+.arcade-btn:active {
+  transform: scale(0.98);
+  box-shadow: 0 0 5px rgba(255, 68, 68, 0.6);
+}
+
+.arcade-btn--green {
+  border-color: var(--color-neon-green);
+  color: var(--color-neon-green);
+  background: linear-gradient(180deg, #0a2a1a 0%, #061a10 100%);
+  box-shadow: var(--glow-green);
+}
+
+.arcade-btn--green:hover {
+  background: linear-gradient(180deg, #1a3a2a 0%, #0a2a1a 100%);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.8), 0 0 40px rgba(0, 255, 136, 0.4);
+}
+
+.arcade-btn--blue {
+  border-color: var(--color-neon-blue);
+  color: var(--color-neon-blue);
+  background: linear-gradient(180deg, #0a1a2a 0%, #060e1a 100%);
+  box-shadow: var(--glow-blue);
+}
+
+.arcade-btn--blue:hover {
+  background: linear-gradient(180deg, #1a2a3a 0%, #0a1a2a 100%);
+  box-shadow: 0 0 20px rgba(0, 204, 255, 0.8), 0 0 40px rgba(0, 204, 255, 0.4);
+}
+
+/* ====== Scrollbar Styles ====== */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-deep-dark);
+  border-left: 1px solid var(--border-purple);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--border-purple), var(--color-fire-red));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fire-red);
+}
+
+/* ====== Input Styles ====== */
+.arcade-input {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding: var(--space-md);
+  background: var(--bg-deep-dark);
+  border: 2px solid var(--border-purple);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.arcade-input:focus {
+  border-color: var(--color-fire-orange);
+  box-shadow: var(--glow-orange);
+}
+
+.arcade-input::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ====== Utility Classes ====== */
+.text-center { text-align: center; }
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+.gap-sm { gap: var(--space-sm); }
+.gap-md { gap: var(--space-md); }
+.gap-lg { gap: var(--space-lg); }
