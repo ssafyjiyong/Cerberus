@@ -27,7 +27,8 @@ Cerberus는 **ISMS 정보보호 인증 심사**를 주제로 한 프로젝트입
 
 | 서비스 | 분류 | 역할 | 권장 |
 |---|---|---|---|
-| IAM | Tier 1 | 최소 권한 접근 제어 | ✅ 이미 적용 |
+| IAM | Tier 1 | 최소 권한 접근 제어 (서비스 간) | ✅ 이미 적용 |
+| 관리자 페이지 인증 | Tier 1 | bcrypt 해시 + 8h 베어러 토큰 (앱 관리자) | ✅ 이미 적용 (배포 직후 기본 비밀번호 변경 필수) |
 | AWS KMS | Tier 1 | 저장 데이터 암호화 | ✅ 적용 |
 | CloudTrail / VPC Flow Logs | Tier 1 | 보안 로그 수집 | ✅ 적용 |
 | GuardDuty | Tier 1 | 위협 탐지 | ✅ 적용 (클릭) |
@@ -62,14 +63,28 @@ Cerberus는 **ISMS 정보보호 인증 심사**를 주제로 한 프로젝트입
 - 액세스 키는 만들지 않거나, 만들면 정기적으로 교체(rotate).
 - IAM Access Analyzer 활성화 — 의도치 않게 외부에 노출된 권한을 탐지.
 
+### 2.1.1 관리자 페이지 인증
+
+애플리케이션 내부에는 별도의 **관리자 페이지**가 있습니다 (`ADMIN.md` 참고).
+이 페이지는 IAM 과는 무관한 자체 인증을 사용합니다.
+
+- **비밀번호 저장:** bcrypt 해시로 DynamoDB `cerberus-leaderboard-config` 테이블에 저장
+- **세션:** 8시간 만료 베어러 토큰 (인메모리 — 서버 재시작 시 모두 무효화)
+- **🔴 배포 직후 가장 먼저 할 일:** 기본 비밀번호 `mzcadmin` 을 강력한 비밀번호로 변경
+  (`ADMIN.md` §5 참고). 게임 자체가 ISMS 통과 기준을 다루므로 관리자 비밀번호도
+  동일 기준(8자 이상, 영문·숫자·특수문자 조합, 분기 1회 변경)을 적용하세요.
+- **추가 강화:** 관리자 페이지를 사무실 IP 등에서만 사용한다면, 2.7의 CloudFront +
+  WAF 구성에 **`/api/admin/*` 경로 한정 IP 화이트리스트 룰**을 추가하는 것을 권장합니다.
+
 ## 2.2 AWS KMS — 저장 데이터 암호화
 
-게임 로그·랭킹 데이터를 **고객 관리형 키(CMK)** 로 암호화합니다.
+게임 로그·랭킹·관리자 설정 데이터를 **고객 관리형 키(CMK)** 로 암호화합니다.
 
 1. 콘솔 > **KMS** > `Create key` > `Symmetric` > 별칭 `cerberus-key` 생성.
-2. 콘솔 > **DynamoDB** > `cerberus-leaderboard` 테이블 > `Additional settings` >
-   `Encryption` > **"Stored in your account, owned and managed by you"** 선택 >
-   `cerberus-key` 지정. `cerberus-leaderboard-logs` 테이블도 동일하게 설정.
+2. 콘솔 > **DynamoDB** > 각 테이블 > `Additional settings` > `Encryption` >
+   **"Stored in your account, owned and managed by you"** 선택 > `cerberus-key` 지정.
+   대상 테이블 3개: `cerberus-leaderboard`, `cerberus-leaderboard-logs`,
+   **`cerberus-leaderboard-config`** (관리자 비밀번호 해시가 저장되므로 특히 권장).
 3. EC2의 **EBS 볼륨 암호화** — 인스턴스 생성 시 기본 활성화 권장. (이미 만든
    인스턴스라면, 암호화된 스냅샷에서 새 볼륨을 만들어 교체.)
 4. 애플리케이션이 암호화된 테이블을 읽고 쓸 수 있도록, `aws/iam-policy.json` 의
@@ -154,9 +169,14 @@ GuardDuty·Inspector 등의 탐지 결과를 한 곳에 모으고, **AWS 기초 
 서버나 데이터가 손상돼도 빠르게 복구할 수 있도록 준비합니다.
 
 - **데이터(DynamoDB):**
-  - 두 테이블 모두 **PITR(Point-in-time recovery)** 활성화 — 최근 35일 내 임의
-    시점으로 복구 가능 (콘솔 > 테이블 > `Backups` 탭).
+  - **3개 테이블 모두**(`cerberus-leaderboard`, `cerberus-leaderboard-logs`,
+    `cerberus-leaderboard-config`) **PITR(Point-in-time recovery)** 활성화 —
+    최근 35일 내 임의 시점으로 복구 가능 (콘솔 > 테이블 > `Backups` 탭).
+    설정(config) 테이블은 관리자가 편집한 문제·통과 기준이 모두 들어 있으므로
+    특히 PITR 적용을 권장합니다.
   - 정기 **온디맨드 백업** 또는 AWS Backup으로 백업 일정 구성.
+  - 관리자 페이지의 **JSON 내보내기**(`ADMIN.md` §2.1)로 문제 세트를 별도
+    파일로도 백업해 두면 빠른 복구·이관에 유용합니다.
 - **서버(EC2):**
   - **AMI(머신 이미지)** 를 정기 생성 — 동일 구성의 서버를 즉시 재기동 가능.
   - **EBS 스냅샷** 자동 일정 구성 (Data Lifecycle Manager).
@@ -230,14 +250,15 @@ Organizations에 속한 **모든 계정·리소스에 WAF/Shield/보안 그룹 �
 
 | 순서 | 작업 | 난이도 | 비용 |
 |---|---|---|---|
+| 0 | **관리자 페이지 기본 비밀번호 변경** (`mzcadmin` → 강력한 비밀번호) | 매우 쉬움 | 무료 |
 | 1 | IAM 최소 권한 · 루트 MFA | (이미 적용) | 무료 |
-| 2 | DynamoDB PITR 활성화 (DR) | 매우 쉬움 (클릭) | 소액 |
+| 2 | DynamoDB PITR 활성화 (3개 테이블 모두 — DR) | 매우 쉬움 (클릭) | 소액 |
 | 3 | GuardDuty 활성화 | 매우 쉬움 (클릭) | 소액 |
 | 4 | Security Hub 활성화 | 매우 쉬움 (클릭) | 소액 |
 | 5 | CloudTrail 추적(Trail) 생성 | 쉬움 | 소액 (S3 비용) |
 | 6 | Amazon Inspector 활성화 | 쉬움 (클릭) | 소액 |
-| 7 | KMS 키 생성 + DynamoDB/EBS 암호화 | 보통 | 소액 |
-| 8 | CloudFront + WAF + HTTPS 구성 | 보통 | 소액~중간 |
+| 7 | KMS 키 생성 + DynamoDB 3개 테이블/EBS 암호화 | 보통 | 소액 |
+| 8 | CloudFront + WAF + HTTPS 구성 (가능하면 `/api/admin/*` IP 화이트리스트) | 보통 | 소액~중간 |
 
 > 2~6번은 대부분 콘솔에서 활성화 버튼만 누르면 되며, 효과 대비 비용이 낮아
 > 가장 먼저 적용할 것을 권장합니다.

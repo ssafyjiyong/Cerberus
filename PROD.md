@@ -71,23 +71,24 @@ AI는 사용자의 답변을 평가하고 JSON 형태로 백엔드에 결과를 
 
 ---
 
-## 7. 현재 진행 상황 및 추가 예정 기능 (2026-05-22 기준)
+## 7. 현재 진행 상황 및 추가 예정 기능 (2026-05-23 기준)
 * **완료된 작업:**
   * 프론트엔드 (React + Vite): 아케이드 테마 UI (Start, Game, Timer, Result, Leaderboard 등) 및 상태 머신 구현 완료.
   * 백엔드 (FastAPI): Amazon Bedrock (Claude) Converse API 연동, Pydantic 모델, DynamoDB 리더보드 로직, 점수 산정 로직 구현 완료. (로컬 테스트 완료)
   * **이스터에그 (Easter Egg):** StartScreen에서 코나미 코드(↑↑↓↓←→←→BA) 입력 시 "제작: 제프리킴" 레트로 네온 크레딧 화면이 노출되도록 구현. 브라우저 검증 완료.
   * **분석 로그 고도화 (Analytics):** 모든 채팅·게임 결과를 DynamoDB 로그 테이블에 적재. 취약 항목 분석을 위해 레벨별 시도 횟수(`level_attempt`), AI가 판정한 누락 통과 기준(`missing_criteria`)을 수집하고, 세션 단위 통과율·평균 시도 횟수·취약 기준 빈도(`get_analytics_summary`)를 집계하도록 구현. (로컬 테스트 완료)
-  * **AWS 배포·유지보수·보안 문서화:** `DEPLOYMENT.md`(단계별 배포 가이드), `MAINTENANCE.md`(재배포·패치), `SECURITY.md`(보안 아키텍처), IAM 최소 권한 정책(`aws/iam-policy.json`) 작성 완료.
+  * **관리자 페이지 (Admin Panel):** 시작 화면에서 케르베로스 첫 번째 머리 5회 클릭 또는 `admin` 키보드 입력 시 진입하는 비공개 관리 콘솔 구현. bcrypt + 8시간 베어러 토큰 인증, 런타임 동적 설정 저장소(`cerberus-leaderboard-config` 테이블), AI 어시스트(질문/통과 기준 생성·다듬기, Bedrock Converse API), 분석 대시보드, 활성 세션 모니터링(5초 자동 갱신), 리더보드 관리(개별 삭제·전체 초기화), 유지보수 모드(신규 게임 503), JSON Import/Export, 기본값 복원 등 6개 탭·18개 API 엔드포인트. 최초 비밀번호 `mzcadmin` (배포 직후 변경 권장). 자세한 사용법은 `ADMIN.md`.
+  * **AWS 배포·유지보수·보안·관리자 문서화:** `DEPLOYMENT.md`(단계별 배포 가이드), `MAINTENANCE.md`(재배포·패치), `SECURITY.md`(보안 아키텍처), `ADMIN.md`(관리자 페이지 가이드), IAM 최소 권한 정책(`aws/iam-policy.json`) 작성 완료.
 * **진행 예정 작업 (Next Steps):**
-  1. **AWS 실제 배포:** `DEPLOYMENT.md`에 따라 EC2 환경에 배포하고 Bedrock·DynamoDB 실연동 테스트.
+  1. **AWS 실제 배포:** `DEPLOYMENT.md`에 따라 EC2 환경에 배포하고 Bedrock·DynamoDB 실연동 테스트. 배포 직후 관리자 페이지에서 기본 비밀번호(`mzcadmin`) 즉시 변경.
   2. **보안 서비스 적용:** `SECURITY.md`의 Tier 1 항목(KMS 암호화, GuardDuty, Security Hub, CloudTrail, Inspector, WAF+CloudFront, DR) 적용.
-  3. **운영 데이터 분석:** 실배포 후 수집된 로그로 취약 심사 항목을 분석하고 난이도·프롬프트를 튜닝.
+  3. **운영 데이터 분석 및 콘텐츠 튜닝:** 실배포 후 수집된 로그로 취약 심사 항목을 분석하고, 관리자 페이지의 AI 어시스트를 활용해 질문·통과 기준을 지속적으로 개선.
 
 ---
 
 ## 8. 보안 아키텍처 (Security)
 ISMS 인증 심사를 주제로 하는 프로젝트인 만큼, 배포 환경 자체도 AWS 보안 모범사례를 반영합니다. 상세 적용 절차는 **`SECURITY.md`** 를 참고하십시오.
 
-* **Tier 1 — 단일 앱 배포에 바로 적용:** IAM 최소 권한, KMS(저장 데이터 암호화), CloudTrail·VPC Flow Logs(보안 로그 수집), GuardDuty(위협 탐지), Security Hub(보안 통합 대시보드), Amazon Inspector(취약점 스캔), WAF + CloudFront(웹 공격 차단), AWS Shield(DDoS 방어), DynamoDB PITR·스냅샷(DR).
+* **Tier 1 — 단일 앱 배포에 바로 적용:** IAM 최소 권한, 관리자 페이지 인증(bcrypt + 베어러 토큰, 배포 직후 기본 비밀번호 변경 필수), KMS(저장 데이터 암호화 — 3개 DynamoDB 테이블 포함), CloudTrail·VPC Flow Logs(보안 로그 수집), GuardDuty(위협 탐지), Security Hub(보안 통합 대시보드), Amazon Inspector(취약점 스캔), WAF + CloudFront(웹 공격 차단 — `/api/admin/*` 경로 IP 화이트리스트 옵션), AWS Shield(DDoS 방어), DynamoDB PITR·스냅샷(DR).
 * **Tier 2 — 조직(다계정) 단위 거버넌스:** AWS Organizations, Control Tower, 랜딩 존, Firewall Manager. 데모 단독으로는 불필요하며, 회사 표준 AWS 환경에 편입될 경우 해당 환경의 정책을 상속받습니다.
 * **DLP:** 현재 개인정보(PII)를 수집하지 않으므로 우선순위가 낮음. 로그를 S3로 내보낼 경우 Amazon Macie 적용을 검토합니다.

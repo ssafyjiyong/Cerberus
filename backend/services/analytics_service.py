@@ -23,6 +23,7 @@ from botocore.exceptions import ClientError
 
 from config import AWS_REGION, DYNAMODB_TABLE_NAME
 from prompts.auditor_prompt import LEVEL_CONFIGS
+from services import config_service
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,23 @@ def get_local_logs() -> list[dict]:
     return _local_logs.copy()
 
 
+def _to_native(value: Any) -> Any:
+    """Decimal → int/float 로 재귀 변환 (JSON 직렬화 가능하게)."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, list):
+        return [_to_native(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_native(v) for k, v in value.items()}
+    return value
+
+
+def list_all_logs() -> list[dict]:
+    """관리자용 — 전체 로그 목록을 JSON 직렬화 가능한 형태로 반환."""
+    raw = _scan_all_logs() if _is_available else _local_logs
+    return [_to_native(item) for item in raw]
+
+
 def _to_int(value: Any) -> int:
     """Decimal·str·int 등 다양한 타입을 안전하게 int 로 변환합니다 (실패 시 0)."""
     if value is None:
@@ -333,7 +351,9 @@ def get_analytics_summary() -> dict[str, Any]:
                 if idx > 0:
                     criteria_counter[idx] = criteria_counter.get(idx, 0) + 1
 
-        pass_criteria = LEVEL_CONFIGS.get(level, {}).get("pass_criteria", [])
+        # 동적 설정의 현재 통과 기준을 사용 (관리자 수정이 반영되도록)
+        level_cfg = config_service.get_level_config(level) or LEVEL_CONFIGS.get(level, {})
+        pass_criteria = level_cfg.get("pass_criteria", [])
         weak_criteria = [
             {
                 "index": idx,

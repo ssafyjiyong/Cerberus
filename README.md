@@ -48,16 +48,16 @@ Cerberus/
 │   ├── main.py               앱 진입점 (uvicorn)
 │   ├── config.py             환경 변수 로드
 │   ├── models.py             Pydantic 요청/응답 모델
-│   ├── routers/              API 라우터 (game · leaderboard · analytics)
-│   ├── services/             핵심 로직 (bedrock · dynamo · game · analytics)
-│   ├── prompts/              AI 심사원 프롬프트 & 레벨 설정
+│   ├── routers/              API 라우터 (game · leaderboard · analytics · admin)
+│   ├── services/             핵심 로직 (bedrock · dynamo · game · analytics · config · auth)
+│   ├── prompts/              AI 심사원 프롬프트 템플릿 & 레벨 기본값
 │   ├── requirements.txt
 │   └── test_bedrock.py       Bedrock 연결 점검 스크립트
 ├── frontend/                 React + Vite 프론트엔드
 │   └── src/
-│       ├── components/        화면 컴포넌트 (Start · Game · Result · Leaderboard 등)
-│       ├── hooks/             커스텀 훅 (useGameState · useTimer · useKonamiCode)
-│       └── utils/             API 통신 · 점수 계산
+│       ├── components/        화면 컴포넌트 (Start · Game · Result · Leaderboard · AdminPanel 등)
+│       ├── hooks/             커스텀 훅 (useGameState · useTimer · useKonamiCode · useAdminTrigger)
+│       └── utils/             API 통신 (api · adminApi · adminAuth) · 점수 계산
 ├── aws/
 │   └── iam-policy.json       배포용 IAM 최소 권한 정책
 ├── .env.example              환경 변수 템플릿
@@ -65,6 +65,7 @@ Cerberus/
 ├── DEPLOYMENT.md             AWS 배포 가이드 (단계별)
 ├── MAINTENANCE.md            유지보수 · 재배포 가이드
 ├── SECURITY.md               보안 아키텍처 가이드
+├── ADMIN.md                  관리자 페이지 사용 가이드
 └── README.md                 이 문서
 ```
 
@@ -133,6 +134,7 @@ npm run dev
 | POST | `/api/leaderboard` | 게임 클리어 점수 등록 |
 | GET | `/api/analytics/summary` | 레벨별 취약도 분석 요약 |
 | GET | `/api/analytics/logs` | 게임 로그 조회 (개발용) |
+| `/api/admin/*` | (18개) | 관리자 페이지 전용 (베어러 토큰 필요) — 자세한 내용은 [ADMIN.md](ADMIN.md) 또는 `/docs` (Swagger UI) |
 | GET | `/api/health` | 서버 상태 확인 |
 
 ---
@@ -156,14 +158,19 @@ npm run dev
 | [DEPLOYMENT.md](DEPLOYMENT.md) | AWS EC2 단계별 배포 가이드 (처음부터 끝까지) |
 | [MAINTENANCE.md](MAINTENANCE.md) | 재배포 · 패치 · 롤백 · 로그 확인 |
 | [SECURITY.md](SECURITY.md) | 보안 아키텍처 (KMS · GuardDuty · WAF · DR 등) |
+| [ADMIN.md](ADMIN.md) | 관리자 페이지 사용 가이드 (문제·설정 편집, AI 어시스트, 모니터링) |
 | [PROD.md](PROD.md) | 프로젝트 기획서 및 진행 현황 |
 
 ---
 
-## 재미 요소 (Easter Egg)
+## 숨겨진 트리거 (Hidden Triggers)
 
-시작 화면에서 아케이드 게임의 전설적인 **코나미 코드** `↑ ↑ ↓ ↓ ← → ← → B A`
-를 입력하면 숨겨진 제작 크레딧이 나타납니다.
+시작 화면에는 두 가지 비공개 키 입력이 숨겨져 있습니다.
+
+| 트리거 | 결과 |
+|---|---|
+| **코나미 코드** `↑ ↑ ↓ ↓ ← → ← → B A` | 숨겨진 제작 크레딧 모달 (이스터에그) |
+| **케르베로스 첫 번째 머리 5회 클릭** 또는 키보드 **`admin`** 입력 | 관리자 페이지 — 자세한 내용은 [ADMIN.md](ADMIN.md) |
 
 ---
 

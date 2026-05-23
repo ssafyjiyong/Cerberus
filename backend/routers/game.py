@@ -34,7 +34,9 @@ async def start_game() -> GameStartResponse:
     """
     try:
         session = game_service.create_session()
-        level_config = LEVEL_CONFIGS[1]
+        # 관리자가 수정했을 수 있으므로 동적 설정에서 Level 1 정보를 조회
+        from services import config_service
+        level_config = config_service.get_level_config(1) or LEVEL_CONFIGS[1]
 
         return GameStartResponse(
             session_id=session.session_id,
@@ -46,6 +48,17 @@ async def start_game() -> GameStartResponse:
                 "심사원의 질문에 성실히 답변해 주세요."
             ),
         )
+    except RuntimeError as exc:
+        if str(exc) == "MAINTENANCE_MODE":
+            raise HTTPException(
+                status_code=503,
+                detail="현재 점검 중입니다. 잠시 후 다시 시도해 주세요.",
+            ) from exc
+        logger.error("게임 시작 실패: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="게임 세션 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+        ) from exc
     except Exception as exc:
         logger.error("게임 시작 실패: %s", exc)
         raise HTTPException(

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(pip install *)",
+      "Bash(python -m py_compile main.py services/config_service.py services/auth_service.py services/bedrock_service.py services/game_service.py services/analytics_service.py services/dynamo_service.py routers/admin.py routers/game.py prompts/auditor_prompt.py)",
+      "Bash(python -c \"import main; print\\('IMPORT_OK'\\)\")",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(python -c \"import json; json.load\\(open\\('aws/iam-policy.json', encoding='utf-8'\\)\\); print\\('JSON_VALID'\\)\")"
     ]
   }
 }

@@ -216,6 +216,69 @@ def submit_score(name: str, score: int, time_used: float) -> bool:
         return False
 
 
+def delete_leaderboard_entry(entry_id: str) -> bool:
+    """관리자가 특정 리더보드 항목을 삭제합니다."""
+    if not _is_available:
+        # Mock 모드: id 가 없으므로 no-op
+        logger.info("Mock 모드 — 리더보드 삭제 요청 무시 (id=%s)", entry_id)
+        return True
+    try:
+        _table.delete_item(Key={"id": entry_id})
+        logger.info("리더보드 항목 삭제: %s", entry_id)
+        return True
+    except ClientError as exc:
+        logger.error("리더보드 항목 삭제 실패: %s", exc)
+        return False
+
+
+def clear_leaderboard() -> int:
+    """관리자가 리더보드 전체를 초기화합니다. 삭제된 항목 수를 반환."""
+    if not _is_available:
+        count = len(_MOCK_LEADERBOARD)
+        _MOCK_LEADERBOARD.clear()
+        logger.info("Mock 리더보드 초기화 — %d개 항목 제거", count)
+        return count
+    try:
+        response = _table.scan()
+        items = response.get("Items", [])
+        for item in items:
+            try:
+                _table.delete_item(Key={"id": item["id"]})
+            except ClientError as exc:
+                logger.warning("항목 삭제 중 오류: %s", exc)
+        logger.info("리더보드 전체 초기화 — %d개 항목 제거", len(items))
+        return len(items)
+    except ClientError as exc:
+        logger.error("리더보드 초기화 실패: %s", exc)
+        return 0
+
+
+def list_all_entries() -> list[dict]:
+    """관리자용 — 리더보드 전체 항목을 id 포함하여 반환."""
+    if not _is_available:
+        return [dict(e) for e in _MOCK_LEADERBOARD]
+    try:
+        response = _table.scan()
+        items = response.get("Items", [])
+        # Decimal → 기본형 변환
+        result = []
+        for item in items:
+            result.append(
+                {
+                    "id": str(item.get("id", "")),
+                    "name": str(item.get("name", "")),
+                    "score": int(item.get("score", 0)),
+                    "time_used": float(item.get("time_used", 0)),
+                    "created_at": str(item.get("created_at", "")),
+                }
+            )
+        result.sort(key=lambda x: x["score"], reverse=True)
+        return result
+    except ClientError as exc:
+        logger.error("리더보드 전체 조회 실패: %s", exc)
+        return []
+
+
 def _cleanup_leaderboard() -> None:
     """리더보드가 10개를 초과하면 하위 항목을 삭제합니다."""
     if not _is_available or _table is None:

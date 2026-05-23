@@ -13,8 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from routers import game, leaderboard, analytics
-from services import dynamo_service, analytics_service
+from routers import admin, analytics, game, leaderboard
+from services import analytics_service, config_service, dynamo_service
 
 # ──────────────────────────────────────────────
 # 로깅 설정
@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     try:
         dynamo_service.ensure_table_exists()
         analytics_service.ensure_log_table_exists()
+        config_service.ensure_config_table_exists()
     except Exception as exc:
         logger.warning(
             "DynamoDB 테이블 초기화를 건너뜁니다 (로컬 개발 모드 추정): %s", exc
@@ -80,6 +81,7 @@ app.add_middleware(
 app.include_router(game.router)
 app.include_router(leaderboard.router)
 app.include_router(analytics.router)
+app.include_router(admin.router)
 
 
 # ──────────────────────────────────────────────

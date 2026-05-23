@@ -14,7 +14,8 @@
 | **코드 위치** | `/opt/cerberus` (GitHub 저장소 클론본) |
 | **백엔드** | systemd 서비스 `cerberus-backend` — `uvicorn` 이 `127.0.0.1:8000` 에서 실행 |
 | **백엔드 가상환경** | `/opt/cerberus/backend/venv` |
-| **환경 변수** | `/opt/cerberus/.env` |
+| **환경 변수(코드 기본값)** | `/opt/cerberus/.env` — 관리자 페이지에서 설정한 값이 있으면 그것이 우선 |
+| **런타임 설정 저장소** | DynamoDB `cerberus-leaderboard-config` — 관리자 페이지가 사용 (`ADMIN.md`) |
 | **프론트엔드 소스** | `/opt/cerberus/frontend` |
 | **프론트엔드 배포물** | `/usr/share/nginx/html` (nginx가 제공하는 정적 파일) |
 | **웹 서버** | nginx — 설정은 `/etc/nginx/nginx.conf` |
@@ -82,9 +83,21 @@ sudo cp -r dist/* /usr/share/nginx/html/
 
 ---
 
-## 3. 환경 설정(.env) 변경
+## 3. 환경 설정 변경
 
-게임 규칙이나 모델을 바꾸려면 `/opt/cerberus/.env` 를 수정합니다.
+게임 규칙이나 모델은 **두 가지 방법**으로 바꿀 수 있습니다.
+
+### 3-A. 관리자 페이지 (권장 — 재배포 불필요)
+
+게임 파라미터·문제·통과 기준·Bedrock 모델 등은 **관리자 페이지**(`ADMIN.md` 참고)
+에서 런타임에 변경할 수 있고 즉시 반영(다음 게임 세션부터)됩니다.
+관리자 페이지의 변경값은 DynamoDB `cerberus-leaderboard-config` 테이블에 저장되어
+**`.env` 보다 우선 적용**됩니다.
+
+### 3-B. `.env` 직접 편집 (초기 기본값 변경)
+
+`.env` 는 관리자 페이지에서 설정을 한 번도 변경하지 않은 경우의 **초기 기본값**
+역할을 합니다. 코드 기본값 자체를 바꿀 때만 사용합니다.
 
 ```bash
 nano /opt/cerberus/.env      # 편집 후 Ctrl+O 저장, Ctrl+X 종료
@@ -101,7 +114,9 @@ sudo systemctl restart cerberus-backend
 | `W_PROMPT` | 점수 — 답변 횟수 가중치 | `10` |
 | `BEDROCK_MODEL_ID` | 사용하는 AI 모델 | `anthropic.claude-3-haiku-20240307-v1:0` |
 
-> `.env` 를 바꾼 뒤에는 **반드시 백엔드를 재시작**해야 적용됩니다.
+> 주의: `.env` 만 바꿔도 관리자 페이지에서 이미 설정된 값이 있으면 그 값이
+> 우선합니다. 강제로 `.env` 기준으로 되돌리려면 관리자 페이지의 **운영 탭 →
+> 기본값으로 복원** 을 실행하세요.
 
 ---
 
@@ -182,10 +197,11 @@ git revert HEAD
 
 ## 8. DynamoDB 데이터 관리
 
-두 개의 테이블이 있습니다.
+세 개의 테이블이 있습니다.
 
 - **`cerberus-leaderboard`** — Top 10 랭킹
 - **`cerberus-leaderboard-logs`** — 모든 채팅/게임 로그 (취약 항목 분석용)
+- **`cerberus-leaderboard-config`** — 관리자 페이지의 동적 설정 (레벨 문제·게임 파라미터·관리자 비밀번호 해시·유지보수 모드). 단일 항목(`config_id="MAIN"`) 구조. 관리자 비밀번호 분실 시 이 항목을 삭제하면 다음 부팅 시 `mzcadmin` 으로 자동 시드됩니다 (자세한 절차는 `ADMIN.md` §7).
 
 ### 분석 데이터 확인
 

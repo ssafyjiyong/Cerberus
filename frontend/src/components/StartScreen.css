@@ -50,12 +50,34 @@
   padding: var(--space-xl);
 }
 
-/* Logo */
-.start-screen__logo {
+/* Logo 래퍼 — 관리자 진입 트리거 박스를 절대 배치하기 위해 relative */
+.start-screen__logo-wrap {
+  position: relative;
   width: min(500px, 80vw);
+  animation: float 3s ease-in-out infinite;
+}
+
+.start-screen__logo {
+  display: block;
+  width: 100%;
   image-rendering: pixelated;
   filter: drop-shadow(0 0 20px rgba(255, 68, 68, 0.6));
-  animation: float 3s ease-in-out infinite;
+}
+
+/* 첫 번째(왼쪽) 머리 영역 — 보이지 않는 클릭 박스 */
+.start-screen__first-head-hit {
+  position: absolute;
+  top: 40%;
+  left: 15%;
+  width: 22%;
+  height: 35%;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;  /* 클릭 가능함을 드러내지 않음 */
+}
+.start-screen__first-head-hit:focus {
+  outline: none;
 }
 
 /* Title */

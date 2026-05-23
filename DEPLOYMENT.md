@@ -248,10 +248,14 @@ sudo systemctl start cerberus-backend
 sudo systemctl status cerberus-backend
 ```
 
-> 백엔드가 처음 실행될 때, DynamoDB 테이블(`cerberus-leaderboard`,
-> `cerberus-leaderboard-logs`)이 **자동으로 생성**됩니다. 로그로 확인하려면:
-> `journalctl -u cerberus-backend --no-pager | tail -20`
+> 백엔드가 처음 실행될 때, 3개의 DynamoDB 테이블(`cerberus-leaderboard`,
+> `cerberus-leaderboard-logs`, `cerberus-leaderboard-config`)이 **자동으로 생성**됩니다.
+> 로그로 확인하려면: `journalctl -u cerberus-backend --no-pager | tail -20`
 > ("테이블 생성 완료" 메시지가 보이면 성공)
+>
+> `cerberus-leaderboard-config` 테이블은 관리자 페이지가 사용하는 동적 설정
+> 저장소이며, 첫 실행 시 기본 관리자 비밀번호 `mzcadmin` 의 bcrypt 해시가
+> 자동으로 시드됩니다.
 
 ---
 
@@ -395,10 +399,24 @@ certbot이 nginx 설정을 자동으로 수정하고 인증서를 90일마다 �
 
 ---
 
-## 15. 배포 완료 후
+## 15. 배포 완료 후 — 가장 먼저 할 일
 
-축하합니다. 배포가 끝났습니다.
+축하합니다. 배포가 끝났습니다. 곧바로 아래 두 가지를 진행하세요.
 
-- 이후 코드를 수정하고 다시 반영하는 방법은 **`MAINTENANCE.md`** 문서를 참고하세요.
-- 운영 환경의 보안을 강화하는 방법(데이터 암호화 · 위협 탐지 · DDoS 방어 등)은
-  **`SECURITY.md`** 문서를 참고하세요.
+### 15-1. 🔴 관리자 비밀번호 변경 (필수)
+
+배포 직후 **관리자 페이지의 기본 비밀번호(`mzcadmin`)가 그대로 노출**되어
+있는 상태입니다. 즉시 변경해야 합니다.
+
+1. 브라우저에서 사이트 시작 화면으로 이동
+2. **키보드로 `admin` 입력** (또는 케르베로스 첫 번째 머리를 5회 클릭)
+3. 비밀번호 입력 모달에 `mzcadmin` 입력 → 관리자 페이지 진입
+4. **운영 탭** → **관리자 비밀번호 변경** 섹션에서 새 비밀번호 설정
+
+관리자 페이지의 전체 사용법은 **`ADMIN.md`** 를 참고하세요.
+
+### 15-2. 추가 문서 안내
+
+- 이후 코드를 수정하고 다시 반영하는 방법: **`MAINTENANCE.md`**
+- 운영 환경의 보안을 강화하는 방법(데이터 암호화 · 위협 탐지 · DDoS 방어 등): **`SECURITY.md`**
+- 관리자 페이지로 문제·설정을 운영 중에 변경하는 방법: **`ADMIN.md`**

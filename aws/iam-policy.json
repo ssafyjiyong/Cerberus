@@ -28,7 +28,8 @@
         "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard",
         "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard/index/*",
         "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs/index/*"
+        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs/index/*",
+        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
       ]
     },
     {
@@ -39,7 +40,8 @@
       ],
       "Resource": [
         "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs"
+        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
       ]
     },
     {

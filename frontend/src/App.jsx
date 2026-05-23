@@ -9,6 +9,9 @@ import GameScreen from './components/GameScreen';
 import ResultScreen from './components/ResultScreen';
 import GameOverScreen from './components/GameOverScreen';
 import Leaderboard from './components/Leaderboard';
+import AdminAccessModal from './components/AdminAccessModal';
+import AdminPanel from './components/AdminPanel';
+import { hasToken } from './utils/adminAuth';
 
 /**
  * App - 케르베로스: 어둠의 심사원 메인 앱
@@ -20,6 +23,21 @@ export default function App() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 관리자 모드: null | 'login' | 'panel'
+  const [adminMode, setAdminMode] = useState(null);
+
+  // 관리자 진입 요청: 기존 토큰이 있으면 바로 패널, 없으면 로그인 모달
+  const handleRequestAdmin = useCallback(() => {
+    setAdminMode(hasToken() ? 'panel' : 'login');
+  }, []);
+
+  const handleAdminLoginSuccess = useCallback(() => {
+    setAdminMode('panel');
+  }, []);
+
+  const handleAdminClose = useCallback(() => {
+    setAdminMode(null);
+  }, []);
 
   // 타임아웃 감지
   useEffect(() => {
@@ -128,6 +146,8 @@ export default function App() {
             onStart={handleStartGame}
             onShowLeaderboard={handleShowLeaderboard}
             isLoading={game.isLoading}
+            onRequestAdmin={handleRequestAdmin}
+            adminActive={!!adminMode}
           />
         );
 
@@ -201,6 +221,17 @@ export default function App() {
             ✕
           </button>
         </div>
+      )}
+
+      {/* 관리자 페이지 (이스터에그 트리거로 진입) */}
+      {adminMode === 'login' && (
+        <AdminAccessModal
+          onClose={handleAdminClose}
+          onSuccess={handleAdminLoginSuccess}
+        />
+      )}
+      {adminMode === 'panel' && (
+        <AdminPanel onClose={handleAdminClose} />
       )}
     </div>
   );

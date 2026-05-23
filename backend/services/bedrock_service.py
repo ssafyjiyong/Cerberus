@@ -14,8 +14,9 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-from config import AWS_REGION, BEDROCK_MODEL_ID
-from prompts.auditor_prompt import LEVEL_CONFIGS
+from config import AWS_REGION
+from prompts.auditor_prompt import render_system_prompt
+from services import config_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +93,16 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
             "Bedrock 클라이언트가 초기화되지 않았습니다. AWS 자격 증명을 확인하세요."
         )
 
-    level_config = LEVEL_CONFIGS.get(level)
+    level_config = config_service.get_level_config(level)
     if level_config is None:
         raise ValueError(f"유효하지 않은 레벨입니다: {level}")
+
+    # 동적 설정으로부터 system prompt 를 매번 렌더링 (관리자 수정이 즉시 반영됨)
+    system_prompt = render_system_prompt(
+        domain=level_config.get("domain", ""),
+        question=level_config.get("question", ""),
+        pass_criteria=level_config.get("pass_criteria", []),
+    )
 
     # Converse API용 메시지 형식으로 변환
     messages: list[dict[str, Any]] = []
@@ -108,8 +116,8 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
 
     try:
         response = _bedrock_client.converse(
-            modelId=BEDROCK_MODEL_ID,
-            system=[{"text": level_config["system_prompt"]}],
+            modelId=config_service.get_bedrock_model_id(),
+            system=[{"text": system_prompt}],
             messages=messages,
             toolConfig={
                 "tools": [EVALUATE_ANSWER_TOOL],
@@ -226,3 +234,121 @@ def _normalize_missing_criteria(raw: Any, status: str) -> list[int]:
         elif isinstance(item, str) and item.strip().isdigit():
             result.append(int(item.strip()))
     return result
+
+
+# ──────────────────────────────────────────────
+# AI 어시스트 (관리자 페이지 — 문제 생성/다듬기)
+# ──────────────────────────────────────────────
+def _simple_text_call(user_msg: str, system_msg: str, max_tokens: int = 512) -> str:
+    """단순 텍스트 응답을 받는 Converse 호출 헬퍼."""
+    if _bedrock_client is None:
+        raise RuntimeError("Bedrock 클라이언트가 초기화되지 않았습니다.")
+
+    response = _bedrock_client.converse(
+        modelId=config_service.get_bedrock_model_id(),
+        system=[{"text": system_msg}],
+        messages=[{"role": "user", "content": [{"text": user_msg}]}],
+        inferenceConfig={"temperature": 0.6, "maxTokens": max_tokens},
+    )
+    for block in response.get("output", {}).get("message", {}).get("content", []):
+        if "text" in block:
+            return block["text"].strip()
+    return ""
+
+
+def generate_question(level: int, hint: str = "") -> str:
+    """주어진 레벨의 심사 영역에 맞는 새 ISMS 심사 질문을 한 문장으로 생성합니다."""
+    level_config = config_service.get_level_config(level) or {}
+    domain = level_config.get("domain", "")
+
+    user_msg = (
+        f"심사 영역: {domain}\n"
+        f"추가 힌트: {hint or '(없음)'}\n\n"
+        "위 영역에 어울리는 ISMS 인증 심사 질문을 **한 문장**으로 작성해 주십시오. "
+        "다른 설명·번호·따옴표 없이 질문 문장만 그대로 출력하십시오."
+    )
+    system_msg = "당신은 ISMS 인증 심사 질문을 한국어로 정확하고 자연스럽게 작성하는 보안 컨설턴트입니다."
+    return _simple_text_call(user_msg, system_msg)
+
+
+def polish_text(text: str, kind: str = "question") -> str:
+    """기존 문장을 의미는 유지한 채 더 명확하고 자연스럽게 다듬습니다."""
+    kind_label = {
+        "question": "ISMS 심사 질문",
+        "criterion": "ISMS 통과 기준 한 항목",
+    }.get(kind, "문장")
+
+    user_msg = (
+        f"다음 {kind_label}을(를) 더 명확하고 자연스러운 한국어로 다듬어 주십시오. "
+        "의미를 바꾸지 말고, 추가 설명 없이 다듬어진 문장만 그대로 출력하십시오.\n\n"
+        f"원문:\n{text}"
+    )
+    system_msg = "당신은 한국어 보안 문서를 정확하고 간결하게 다듬는 편집자입니다."
+    return _simple_text_call(user_msg, system_msg)
+
+
+# 통과 기준 생성용 도구 스키마
+_GENERATE_CRITERIA_TOOL: dict[str, Any] = {
+    "toolSpec": {
+        "name": "provide_criteria",
+        "description": "ISMS 통과 기준을 3개의 짧은 한국어 항목으로 반환합니다.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "criteria": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "각 통과 기준 항목 (정확히 3개의 짧은 문장)",
+                    }
+                },
+                "required": ["criteria"],
+            }
+        },
+    }
+}
+
+
+def generate_pass_criteria(question: str, domain: str = "") -> list[str]:
+    """주어진 심사 질문에 대한 ISMS 통과 기준 3가지를 생성합니다."""
+    if _bedrock_client is None:
+        raise RuntimeError("Bedrock 클라이언트가 초기화되지 않았습니다.")
+
+    response = _bedrock_client.converse(
+        modelId=config_service.get_bedrock_model_id(),
+        system=[
+            {
+                "text": (
+                    "당신은 ISMS 인증 심사 기준을 작성하는 보안 컨설턴트입니다. "
+                    "각 통과 기준은 짧고 명확한 한 줄의 한국어로 작성합니다."
+                )
+            }
+        ],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": (
+                            f"심사 영역: {domain or '(미지정)'}\n"
+                            f"심사 질문: {question}\n\n"
+                            "이 질문에 대한 ISMS 통과 기준 **3가지**를 "
+                            "provide_criteria 도구로 반환하십시오."
+                        )
+                    }
+                ],
+            }
+        ],
+        toolConfig={
+            "tools": [_GENERATE_CRITERIA_TOOL],
+            "toolChoice": {"tool": {"name": "provide_criteria"}},
+        },
+        inferenceConfig={"temperature": 0.5, "maxTokens": 512},
+    )
+
+    for block in response.get("output", {}).get("message", {}).get("content", []):
+        if "toolUse" in block:
+            criteria = block["toolUse"].get("input", {}).get("criteria", [])
+            if isinstance(criteria, list):
+                return [str(c).strip() for c in criteria if str(c).strip()][:3]
+    return []

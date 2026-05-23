@@ -1,19 +1,35 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import './StartScreen.css';
 import cerberusLogo from '../assets/cerberus_logo.png';
 import gameBackground from '../assets/game_background.png';
 import CreditsModal from './CreditsModal';
 import { useKonamiCode } from '../hooks/useKonamiCode';
+import { useAdminTrigger } from '../hooks/useAdminTrigger';
 
 /**
  * StartScreen - 게임 시작 화면
  * 아케이드 스타일의 타이틀 화면으로, 로고와 시작 버튼을 표시합니다.
  *
- * 숨겨진 이스터에그: 코나미 코드(↑↑↓↓←→←→BA)를 입력하면
- * 제작 크레딧(CreditsModal)이 노출됩니다.
+ * 숨겨진 트리거:
+ *  - 코나미 코드(↑↑↓↓←→←→BA) → 제작 크레딧 모달
+ *  - 첫 번째 머리 5회 클릭 또는 "admin" 키보드 입력 → 관리자 페이지
  */
-export default function StartScreen({ onStart, onShowLeaderboard, isLoading }) {
+export default function StartScreen({
+  onStart,
+  onShowLeaderboard,
+  isLoading,
+  onRequestAdmin,
+  adminActive = false,
+}) {
   const [showCredits, closeCredits] = useKonamiCode();
+  const adminTrigger = useAdminTrigger({ disabled: adminActive });
+
+  useEffect(() => {
+    if (adminTrigger.triggered && onRequestAdmin) {
+      adminTrigger.reset();
+      onRequestAdmin();
+    }
+  }, [adminTrigger, onRequestAdmin]);
 
   return (
     <div className="start-screen" id="start-screen">
@@ -24,12 +40,21 @@ export default function StartScreen({ onStart, onShowLeaderboard, isLoading }) {
 
       {/* 콘텐츠 */}
       <div className="start-screen__content">
-        {/* 로고 */}
-        <img
-          src={cerberusLogo}
-          alt="Cerberus: The Dark Auditor"
-          className="start-screen__logo"
-        />
+        {/* 로고 — 첫 번째 머리 영역에 관리자 진입 트리거가 숨겨져 있음 */}
+        <div className="start-screen__logo-wrap">
+          <img
+            src={cerberusLogo}
+            alt="Cerberus: The Dark Auditor"
+            className="start-screen__logo"
+          />
+          <button
+            type="button"
+            className="start-screen__first-head-hit"
+            onClick={adminTrigger.handleHeadClick}
+            aria-label="첫 번째 머리"
+            tabIndex={-1}
+          />
+        </div>
 
         {/* 부제 */}
         <div>
