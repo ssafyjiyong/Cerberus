@@ -25,11 +25,11 @@
         "dynamodb:DescribeTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard/index/*",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs/index/*",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-config"
       ]
     },
     {
@@ -39,21 +39,9 @@
         "dynamodb:CreateTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
-      ]
-    },
-    {
-      "Sid": "KMSForEncryptedTables",
-      "Effect": "Allow",
-      "Action": [
-        "kms:Decrypt",
-        "kms:GenerateDataKey",
-        "kms:DescribeKey"
-      ],
-      "Resource": [
-        "<KMS_KEY_ARN>"
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-config"
       ]
     }
   ]
