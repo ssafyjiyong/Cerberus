@@ -56,8 +56,8 @@ GitHub에 올라간 Cerberus 코드를 AWS 서버(EC2) 1대에 올려서, 누구
 AI 심사원은 Amazon Bedrock의 Claude 모델을 씁니다. 이 모델은 기본적으로
 꺼져 있어서, 먼저 활성화해야 합니다.
 
-1. AWS 콘솔 오른쪽 위에서 **리전을 `미국 동부(버지니아 북부) us-east-1`** 로 변경합니다.
-   (이 가이드는 전부 `us-east-1` 기준입니다. 다른 리전을 쓰면 모든 단계의 리전을 맞춰야 합니다.)
+1. AWS 콘솔 오른쪽 위에서 **리전을 `아시아 태평양(서울) ap-northeast-2`** 로 변경합니다.
+   (이 가이드는 전부 `ap-northeast-2` 기준입니다. 다른 리전을 쓰면 모든 단계의 리전을 맞춰야 합니다.)
 2. 검색창에 **`Bedrock`** 입력 → Amazon Bedrock 으로 이동
 3. 왼쪽 메뉴 맨 아래 **`Model access`** 클릭
 4. **`Manage model access`** (또는 `Enable specific models`) 버튼 클릭
@@ -212,7 +212,7 @@ cp /opt/cerberus/.env.example /opt/cerberus/.env
 > **중요:** EC2 서버에서는 `.env`에 AWS 액세스 키를 **넣지 않습니다.**
 > STEP 2에서 연결한 IAM 역할(`cerberus-ec2-role`)이 자동으로 권한을
 > 제공하기 때문입니다. `.env`의 AWS 키 줄은 주석(`#`) 처리된 채로 두세요.
-> `AWS_REGION=us-east-1` 만 맞으면 됩니다.
+> `AWS_REGION=ap-northeast-2` 만 맞으면 됩니다.
 
 ### 9-3. 백엔드를 항상 실행되는 서비스로 등록
 

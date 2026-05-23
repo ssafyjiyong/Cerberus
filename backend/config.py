@@ -14,7 +14,7 @@ load_dotenv(dotenv_path=_env_path)
 # ──────────────────────────────────────────────
 # AWS 설정
 # ──────────────────────────────────────────────
-AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+AWS_REGION: str = os.getenv("AWS_REGION", "ap-northeast-2")
 BEDROCK_MODEL_ID: str = os.getenv(
     "BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0"
 )

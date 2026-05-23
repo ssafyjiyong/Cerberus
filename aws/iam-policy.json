@@ -9,7 +9,7 @@
         "bedrock:InvokeModelWithResponseStream"
       ],
       "Resource": [
-        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
+        "arn:aws:bedrock:ap-northeast-2::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
       ]
     },
     {
@@ -25,11 +25,11 @@
         "dynamodb:DescribeTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard/index/*",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs/index/*",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
       ]
     },
     {
@@ -39,9 +39,9 @@
         "dynamodb:CreateTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:us-east-1:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:<ACCOUNT_ID>:table/cerberus-leaderboard-config"
       ]
     },
     {
