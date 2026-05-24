@@ -508,3 +508,167 @@ select.admin-input option {
   background: var(--bg-deep-dark);
   color: var(--text-primary);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .admin-modal {
+    padding: var(--space-md);
+  }
+
+  .admin-modal__panel {
+    padding: var(--space-xl) var(--space-lg);
+  }
+
+  .admin-panel__header {
+    padding: var(--space-sm) var(--space-md);
+    gap: var(--space-sm);
+  }
+
+  .admin-panel__nav {
+    padding: 0 var(--space-sm);
+  }
+
+  .admin-panel__tab {
+    padding: var(--space-sm) var(--space-md);
+    letter-spacing: 1px;
+  }
+
+  .admin-panel__content {
+    padding: var(--space-md);
+  }
+
+  .admin-card {
+    padding: var(--space-md);
+  }
+
+  .admin-stat-grid {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-sm);
+  }
+
+  .admin-stat__value {
+    font-size: 18px;
+  }
+
+  /* 테이블은 좁은 폭에서 가로 스크롤로 */
+  .admin-panel__content .admin-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-modal {
+    padding: var(--space-sm);
+  }
+
+  .admin-modal__panel {
+    padding: var(--space-lg) var(--space-md);
+    border-width: 1.5px;
+  }
+
+  .admin-modal__header {
+    letter-spacing: 1.5px;
+    margin-bottom: var(--space-md);
+  }
+
+  .admin-modal__input {
+    font-size: 16px; /* iOS 자동 줌 방지 */
+    padding: var(--space-sm);
+  }
+
+  .admin-modal__actions {
+    flex-direction: column;
+  }
+
+  .admin-modal__btn,
+  .admin-btn {
+    padding: var(--space-sm) var(--space-md);
+    letter-spacing: 1px;
+  }
+
+  .admin-panel__header {
+    padding: 8px;
+    flex-wrap: wrap;
+  }
+
+  .admin-panel__title {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+  }
+
+  .admin-panel__nav {
+    padding: 0 6px;
+  }
+
+  .admin-panel__tab {
+    padding: 8px 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .admin-panel__content {
+    padding: var(--space-sm);
+  }
+
+  .admin-card {
+    padding: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+
+  .admin-card__title {
+    letter-spacing: 1px;
+    margin-bottom: var(--space-sm);
+  }
+
+  .admin-input,
+  .admin-textarea {
+    font-size: 16px; /* iOS 자동 줌 방지 */
+    padding: 8px 10px;
+  }
+
+  .admin-row-actions {
+    gap: 6px;
+  }
+
+  .admin-row-actions .admin-btn {
+    flex: 1 1 calc(50% - 3px);
+  }
+
+  .admin-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .admin-stat {
+    padding: var(--space-sm);
+  }
+
+  .admin-stat__value {
+    font-size: 16px;
+  }
+
+  .admin-stat__label {
+    font-size: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  .admin-toast {
+    bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    font-size: 9px;
+    letter-spacing: 1px;
+    max-width: 92vw;
+    text-align: center;
+  }
+
+  .admin-criterion-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .admin-criterion-row .admin-input {
+    flex: 1 1 100%;
+  }
+}

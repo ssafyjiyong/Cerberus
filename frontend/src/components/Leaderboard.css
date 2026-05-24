@@ -159,3 +159,83 @@
 .leaderboard__trophy {
   margin-right: var(--space-xs);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .leaderboard {
+    padding: var(--space-md);
+  }
+
+  .leaderboard__header,
+  .leaderboard__row {
+    grid-template-columns: 40px 1fr 80px 70px;
+    padding: var(--space-sm);
+  }
+
+  .leaderboard__header-cell {
+    font-size: 7px;
+  }
+
+  .leaderboard__rank { font-size: 12px; }
+  .leaderboard__rank--1 { font-size: 14px; }
+  .leaderboard__name { font-size: 10px; }
+  .leaderboard__score { font-size: 11px; }
+  .leaderboard__time { font-size: 9px; }
+}
+
+@media (max-width: 480px) {
+  .leaderboard {
+    padding: var(--space-sm);
+    justify-content: flex-start;
+    padding-top: var(--space-md);
+  }
+
+  .leaderboard__content {
+    gap: var(--space-md);
+  }
+
+  .leaderboard__title {
+    letter-spacing: 2px;
+  }
+
+  /* 좁은 폭: 시간 컬럼 제거하고 RANK / NAME / SCORE 만 */
+  .leaderboard__header,
+  .leaderboard__row {
+    grid-template-columns: 32px 1fr 64px;
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .leaderboard__time {
+    display: none;
+  }
+
+  .leaderboard__header-cell:nth-child(4) {
+    display: none;
+  }
+
+  .leaderboard__header-cell {
+    font-size: 7px;
+    letter-spacing: 0.5px;
+  }
+
+  .leaderboard__rank { font-size: 11px; }
+  .leaderboard__rank--1 { font-size: 13px; }
+  .leaderboard__name {
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .leaderboard__score { font-size: 10px; }
+
+  .leaderboard__empty {
+    padding: var(--space-lg);
+    font-size: 9px;
+  }
+
+  .leaderboard__back-btn {
+    width: 100%;
+  }
+}

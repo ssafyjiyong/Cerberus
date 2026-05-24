@@ -50,3 +50,38 @@
   border-color: var(--color-fire-red);
   box-shadow: var(--glow-red);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .timer {
+    padding: 4px 8px;
+    gap: 6px;
+    border-width: 1.5px;
+  }
+
+  .timer__icon {
+    font-size: 14px;
+  }
+
+  .timer__display {
+    letter-spacing: 2px;
+    min-width: 72px;
+  }
+}
+
+@media (max-width: 480px) {
+  .timer {
+    padding: 3px 6px;
+    gap: 4px;
+  }
+
+  .timer__icon {
+    font-size: 12px;
+  }
+
+  .timer__display {
+    font-size: 14px;
+    letter-spacing: 1.5px;
+    min-width: 60px;
+  }
+}

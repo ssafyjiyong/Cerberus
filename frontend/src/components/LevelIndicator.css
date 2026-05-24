@@ -111,3 +111,79 @@
   text-shadow: var(--glow-red);
   animation: blink 1s step-end infinite;
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .level-indicator {
+    gap: var(--space-sm);
+    padding: 4px 8px;
+    border-width: 1.5px;
+  }
+
+  .level-indicator__icon {
+    font-size: 22px;
+  }
+
+  .level-indicator__label {
+    font-size: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  .level-indicator__separator {
+    width: 12px;
+  }
+
+  .level-indicator__prompts {
+    margin-left: 4px;
+    padding-left: var(--space-sm);
+    gap: 3px;
+  }
+
+  .level-indicator__prompt-label {
+    font-size: 8px;
+  }
+
+  .level-indicator__prompt-count {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .level-indicator {
+    gap: 6px;
+    padding: 3px 6px;
+  }
+
+  .level-indicator__icon {
+    font-size: 18px;
+  }
+
+  .level-indicator__head--active .level-indicator__icon {
+    transform: scale(1.1);
+  }
+
+  .level-indicator__label {
+    font-size: 7px;
+    letter-spacing: 0;
+  }
+
+  .level-indicator__head--cleared::after {
+    font-size: 10px;
+    bottom: -2px;
+    right: -4px;
+  }
+
+  .level-indicator__separator {
+    width: 8px;
+  }
+
+  .level-indicator__prompts {
+    margin-left: 2px;
+    padding-left: 6px;
+  }
+
+  .level-indicator__prompt-count {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+}

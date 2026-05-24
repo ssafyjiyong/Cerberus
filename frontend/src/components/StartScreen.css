@@ -210,3 +210,122 @@
   background: rgba(255, 204, 0, 0.1);
   box-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .start-screen__content {
+    gap: var(--space-lg);
+    padding: var(--space-lg) var(--space-md);
+  }
+
+  .start-screen__logo-wrap {
+    width: min(420px, 78vw);
+  }
+
+  .start-screen__decorations {
+    gap: var(--space-md);
+  }
+
+  .start-screen__led {
+    width: 9px;
+    height: 9px;
+  }
+
+  .start-screen__info {
+    line-height: 2;
+    padding: var(--space-sm) var(--space-md);
+    max-width: 92vw;
+  }
+
+  .start-screen__start-btn {
+    padding: var(--space-md) var(--space-xl);
+    letter-spacing: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  .start-screen {
+    /* 컨텐츠 많으면 세로 스크롤 허용 */
+    overflow-y: auto;
+    justify-content: flex-start;
+    padding-top: var(--space-md);
+  }
+
+  .start-screen__content {
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-sm);
+  }
+
+  .start-screen__logo-wrap {
+    width: min(300px, 82vw);
+  }
+
+  .start-screen__title {
+    letter-spacing: 2px;
+  }
+
+  .start-screen__subtitle {
+    margin-top: var(--space-sm);
+    letter-spacing: 1px;
+    line-height: 1.6;
+  }
+
+  .start-screen__decorations {
+    gap: var(--space-sm);
+  }
+
+  .start-screen__led {
+    width: 7px;
+    height: 7px;
+  }
+
+  .start-screen__insert-coin {
+    letter-spacing: 2px;
+    margin-top: var(--space-sm);
+  }
+
+  .start-screen__start-btn {
+    padding: var(--space-md) var(--space-lg);
+    letter-spacing: 1.5px;
+    border-width: 2px;
+  }
+
+  .start-screen__info {
+    line-height: 1.9;
+    letter-spacing: 0.5px;
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .start-screen__info-title {
+    margin-bottom: var(--space-sm);
+    letter-spacing: 1px;
+  }
+
+  .start-screen__leaderboard-btn {
+    letter-spacing: 1px;
+    padding: var(--space-sm) var(--space-md);
+  }
+}
+
+/* 가로(landscape) 모드 + 세로 짧은 화면: 로고 더 축소 */
+@media (max-height: 560px) and (orientation: landscape) {
+  .start-screen {
+    overflow-y: auto;
+    justify-content: flex-start;
+    padding-top: var(--space-sm);
+  }
+
+  .start-screen__content {
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+  }
+
+  .start-screen__logo-wrap {
+    width: min(220px, 36vw);
+    animation: none; /* float 애니메이션 OFF */
+  }
+
+  .start-screen__decorations {
+    display: none;
+  }
+}

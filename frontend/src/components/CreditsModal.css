@@ -196,3 +196,39 @@
 .credits-modal__close:active {
   transform: scale(0.98);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 480px) {
+  .credits-modal {
+    padding: var(--space-sm);
+  }
+
+  .credits-modal__cabinet {
+    width: min(360px, 94vw);
+    padding: var(--space-lg) var(--space-md);
+    gap: var(--space-md);
+    border-width: 2px;
+  }
+
+  .credits-modal__heads {
+    gap: var(--space-sm);
+  }
+
+  .credits-modal__roll {
+    gap: 6px;
+    padding: var(--space-sm) 0;
+  }
+
+  .credits-modal__title {
+    letter-spacing: 2px;
+  }
+
+  .credits-modal__name {
+    letter-spacing: 3px;
+  }
+
+  .credits-modal__close {
+    padding: var(--space-sm) var(--space-md);
+    letter-spacing: 1.5px;
+  }
+}

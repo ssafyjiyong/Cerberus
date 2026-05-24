@@ -3,6 +3,8 @@
   width: 100%;
   height: 100%;
   position: relative;
+  /* iOS Safari 100vh 우회 + 노치 안전영역 */
+  min-height: 100dvh;
 }
 
 .app__inner {
@@ -49,4 +51,44 @@
   cursor: pointer;
   margin-left: var(--space-md);
   font-size: 14px;
+}
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .app__screen {
+    top: 6px;
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+  }
+
+  .app__error-toast {
+    top: var(--space-md);
+    font-size: 8px;
+    padding: var(--space-sm) var(--space-md);
+    line-height: 1.6;
+    max-width: 94vw;
+  }
+}
+
+@media (max-width: 480px) {
+  .app__screen {
+    top: 3px;
+    left: 3px;
+    right: 3px;
+    bottom: 3px;
+  }
+
+  .app__error-toast {
+    top: 6px;
+    font-size: 8px;
+    padding: 6px 10px;
+    border-width: 1px;
+    box-shadow: 0 0 10px rgba(255, 0, 68, 0.6);
+  }
+
+  .app__error-close {
+    margin-left: var(--space-sm);
+    font-size: 12px;
+  }
 }

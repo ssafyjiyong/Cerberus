@@ -182,3 +182,117 @@
   flex-wrap: wrap;
   justify-content: center;
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .result-screen {
+    padding: var(--space-md);
+  }
+
+  .result-screen__content {
+    gap: var(--space-md);
+  }
+
+  .result-screen__score-box {
+    padding: var(--space-lg);
+  }
+
+  .result-screen__score-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: var(--space-sm);
+  }
+
+  .result-screen__breakdown-label {
+    font-size: 10px;
+  }
+
+  .result-screen__breakdown-value {
+    font-size: 11px;
+  }
+
+  .result-screen__name-section {
+    padding: var(--space-md);
+  }
+
+  .result-screen__name-title {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .result-screen {
+    padding: var(--space-sm);
+    /* 결과 화면은 길어질 수 있으므로 세로 정렬을 상단부터 */
+    justify-content: flex-start;
+    padding-top: var(--space-md);
+  }
+
+  .result-screen__content {
+    gap: var(--space-sm);
+  }
+
+  .result-screen__title {
+    letter-spacing: 2px;
+  }
+
+  .result-screen__subtitle {
+    letter-spacing: 1px;
+  }
+
+  .result-screen__score-box {
+    padding: var(--space-md);
+    border-width: 1.5px;
+  }
+
+  .result-screen__score-label {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+  }
+
+  .result-screen__breakdown-row {
+    padding: 6px 10px;
+  }
+
+  .result-screen__breakdown-label {
+    font-size: 9px;
+  }
+
+  .result-screen__breakdown-value {
+    font-size: 10px;
+  }
+
+  .result-screen__name-section {
+    padding: var(--space-md) var(--space-sm);
+    border-width: 1.5px;
+  }
+
+  .result-screen__name-title {
+    font-size: 10px;
+    letter-spacing: 1px;
+    margin-bottom: var(--space-sm);
+  }
+
+  .result-screen__name-form {
+    flex-direction: column;
+    gap: var(--space-sm);
+    align-items: stretch;
+  }
+
+  .result-screen__name-input {
+    font-size: 13px;
+    padding: var(--space-sm);
+    max-width: 100%;
+  }
+
+  .result-screen__actions {
+    width: 100%;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .result-screen__actions .arcade-btn {
+    width: 100%;
+  }
+}

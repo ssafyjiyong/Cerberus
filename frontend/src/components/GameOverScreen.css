@@ -84,3 +84,71 @@
   display: flex;
   gap: var(--space-md);
 }
+
+/* ====== 반응형 ====== */
+@media (max-width: 768px) {
+  .gameover-screen {
+    padding: var(--space-md);
+  }
+
+  .gameover-screen__content {
+    gap: var(--space-lg);
+  }
+
+  .gameover-screen__skull {
+    font-size: 48px;
+  }
+}
+
+@media (max-width: 480px) {
+  .gameover-screen {
+    padding: var(--space-sm);
+    justify-content: flex-start;
+    padding-top: var(--space-lg);
+    overflow-y: auto;
+  }
+
+  .gameover-screen__content {
+    gap: var(--space-md);
+    width: 100%;
+  }
+
+  .gameover-screen__title {
+    letter-spacing: 3px;
+  }
+
+  .gameover-screen__reason {
+    line-height: 1.7;
+    letter-spacing: 1px;
+  }
+
+  .gameover-screen__skull {
+    font-size: 40px;
+  }
+
+  .gameover-screen__stats {
+    max-width: 100%;
+  }
+
+  .gameover-screen__stat {
+    padding: 6px 10px;
+  }
+
+  .gameover-screen__stat-label {
+    font-size: 10px;
+  }
+
+  .gameover-screen__stat-value {
+    font-size: 11px;
+  }
+
+  .gameover-screen__actions {
+    width: 100%;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .gameover-screen__actions .arcade-btn {
+    width: 100%;
+  }
+}
