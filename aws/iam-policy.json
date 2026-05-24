@@ -13,6 +13,15 @@
       ]
     },
     {
+      "Sid": "MarketplaceSubscriptionForBedrock",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:ViewSubscriptions",
+        "aws-marketplace:Subscribe"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "DynamoDBDataAccess",
       "Effect": "Allow",
       "Action": [
@@ -25,11 +34,11 @@
         "dynamodb:DescribeTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard/index/*",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs/index/*",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-config"
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard-logs/index/*",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard-config"
       ]
     },
     {
@@ -39,9 +48,9 @@
         "dynamodb:CreateTable"
       ],
       "Resource": [
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-logs",
-        "arn:aws:dynamodb:ap-northeast-2:ACCOUNT_ID:table/cerberus-leaderboard-config"
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard-logs",
+        "arn:aws:dynamodb:ap-northeast-2:688886174048:table/cerberus-leaderboard-config"
       ]
     }
   ]
