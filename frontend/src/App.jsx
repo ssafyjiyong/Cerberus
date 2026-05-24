@@ -202,8 +202,10 @@ export default function App() {
             isLoading={game.isLoading}
             gameState={game.gameState}
             levelInfo={game.stageInfo}
-            stageDomain={game.stageDomain}
-            passLogic={game.passLogic}
+            stageDomain={game.stageSubtitle}
+            stageTitle={game.stageTitle}
+            ismsControlId={game.ismsControlId}
+            ismsControlTitle={game.ismsControlTitle}
             onSendMessage={handleSendMessage}
           />
         );
@@ -228,7 +230,14 @@ export default function App() {
             currentLevel={game.stage}
             promptCount={game.promptCount}
             clearedLevels={game.clearedLevels}
+            clearedStages={game.clearedStages}
+            totalScore={game.totalScore}
+            totalTimeUsed={game.totalTimeUsed}
+            failedSessionId={game.sessionId}
             onPlayAgain={handlePlayAgain}
+            onSubmitScore={handleSubmitScore}
+            onShowLeaderboard={handleShowLeaderboard}
+            isSubmitting={isSubmitting}
           />
         );
 

@@ -1,8 +1,16 @@
 """
 Cerberus: The Dark Auditor - Amazon Bedrock 서비스
 
-Bedrock Converse API를 사용하여 ISMS 심사원 AI의 답변 평가를 수행합니다.
-Tool Use(Function Calling)를 활용하여 구조화된 JSON 응답을 보장합니다.
+Bedrock Converse API + Tool Use 로 ISMS-P 심사원 AI 의 답변 평가를 수행합니다.
+
+새 평가 모델 (v2 — tier 기반):
+    tier ∈ { "full", "half", "fail" }
+    - full : 정의된 full 경로의 trigger + compensating 키워드를 누적 대화에서 모두 충족
+    - half : 정의된 half 경로의 trigger + acknowledgment 키워드를 누적 대화에서 모두 충족
+    - fail : 위 어디에도 해당하지 않거나 trigger 만 나오고 보완이 없음
+
+서버는 AI 의 tier 를 그대로 사용하되, matched_path_id 의 유효성과 trigger 키워드의
+실제 등장 여부를 후처리로 검증해 환각(hallucination)을 줄입니다.
 """
 
 from __future__ import annotations
@@ -15,7 +23,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from config import AWS_REGION
-from prompts.auditor_prompt import normalize_pass_logic, render_system_prompt
+from prompts.auditor_prompt import normalize_tier, render_system_prompt
 from services import config_service
 
 logger = logging.getLogger(__name__)
@@ -34,81 +42,83 @@ except Exception as exc:
     _bedrock_client = None
 
 # ──────────────────────────────────────────────
-# Tool Use 스키마 정의
+# Tool Use 스키마 정의 (v2 — tier 기반)
 # ──────────────────────────────────────────────
 EVALUATE_ANSWER_TOOL: dict[str, Any] = {
     "toolSpec": {
         "name": "evaluate_answer",
         "description": (
-            "피심사자의 답변을 평가하고 결과를 구조화된 JSON으로 반환합니다. "
-            "status는 반드시 'pass' 또는 'fail'이어야 합니다."
+            "피심사자의 답변을 시나리오 기반 answer_paths 에 따라 평가하고 결과를 "
+            "구조화 JSON 으로 반환합니다."
         ),
         "inputSchema": {
             "json": {
                 "type": "object",
                 "properties": {
-                    "status": {
+                    "tier": {
                         "type": "string",
-                        "enum": ["pass", "fail"],
-                        "description": "평가 결과: 'pass'(합격) 또는 'fail'(불합격)",
+                        "enum": ["full", "half", "fail"],
+                        "description": (
+                            "평가 결과 등급. full=만점 통과, half=절반 점수 통과, fail=불합격."
+                        ),
+                    },
+                    "matched_path_id": {
+                        "type": "string",
+                        "description": (
+                            "tier 가 full/half 일 때 충족한 answer_path 의 id. "
+                            "fail 일 때는 빈 문자열 또는 가장 근접했던 path id."
+                        ),
                     },
                     "message": {
                         "type": "string",
-                        "description": "심사원의 피드백 메시지 (한국어)",
-                    },
-                    "missing_criteria": {
-                        "type": "array",
-                        "items": {"type": "integer"},
                         "description": (
-                            "불합격(fail) 시 피심사자가 충족하지 못한 통과 기준의 "
-                            "번호 목록입니다. 예: 1번과 3번 기준이 부족하면 [1, 3]. "
-                            "합격(pass) 시에는 빈 배열 []을 반환하십시오."
+                            "심사원의 피드백 메시지(한국어). half/full 진입을 위해 후속 답변이 "
+                            "필요하면 해당 rebuttal/follow_up 을 톤에 맞춰 던지십시오. "
+                            "fail 이면 default_rebuttal 톤으로 부족한 지점을 짚어 주십시오."
+                        ),
+                    },
+                    "missing_aspects": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "fail 시 무엇이 부족했는지 사람이 읽을 한국어 요약 항목들. "
+                            "예: ['보완통제(위험평가/경영진 승인) 미언급']. pass 시 빈 배열."
                         ),
                     },
                 },
-                "required": ["status", "message", "missing_criteria"],
+                "required": ["tier", "matched_path_id", "message", "missing_aspects"],
             }
         },
     }
 }
 
 
-def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
+def evaluate_answer(question: dict, conversation_history: list[dict]) -> dict:
     """
-    Bedrock Converse API를 호출하여 피심사자의 답변을 평가합니다.
+    Bedrock Converse API 를 호출하여 피심사자의 답변을 평가합니다.
 
     Args:
-        level: 현재 레벨 번호 (1~3)
-        conversation_history: 대화 이력 리스트
-            각 항목은 {"role": "user"|"assistant", "content": "..."} 형태
+        question: 세션 스냅샷의 질문 dict (auditor_prompt.normalize_question 결과)
+        conversation_history: [{"role": "user"|"assistant", "content": "..."}, ...]
 
     Returns:
-        {"status": "pass"|"fail", "message": "..."} 형태의 딕셔너리
-
-    Raises:
-        RuntimeError: Bedrock 클라이언트가 초기화되지 않았거나 API 호출 실패 시
+        {
+          "tier": "full"|"half"|"fail",
+          "matched_path_id": "...",
+          "message": "...",
+          "missing_aspects": [...]
+        }
     """
     if _bedrock_client is None:
         raise RuntimeError(
             "Bedrock 클라이언트가 초기화되지 않았습니다. AWS 자격 증명을 확인하세요."
         )
 
-    level_config = config_service.get_level_config(level)
-    if level_config is None:
-        raise ValueError(f"유효하지 않은 레벨입니다: {level}")
+    if not question:
+        raise ValueError("질문(question) 이 비어있습니다.")
 
-    pass_logic = normalize_pass_logic(level_config.get("pass_logic"))
-    pass_criteria = list(level_config.get("pass_criteria", []))
+    system_prompt = render_system_prompt(question)
 
-    # 동적 설정으로부터 system prompt 를 매번 렌더링 (관리자 수정이 즉시 반영됨)
-    system_prompt = render_system_prompt(
-        domain=level_config.get("domain", ""),
-        question=level_config.get("question", ""),
-        pass_criteria=pass_criteria,
-        pass_logic=pass_logic,
-    )
-
-    # Converse API용 메시지 형식으로 변환
     messages: list[dict[str, Any]] = []
     for entry in conversation_history:
         messages.append(
@@ -130,29 +140,43 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
                 },
             },
             inferenceConfig={
-                "temperature": 0.3,
+                "temperature": 0.2,
                 "maxTokens": 1024,
             },
         )
-
-        # Tool Use 응답 파싱
         parsed = _parse_tool_use_response(response)
 
-        # ── 백엔드에서 pass_logic 강제 적용 (AI 의 status 는 참고만) ──
-        # AI 가 missing_criteria 만 정확히 채워주면 합/불 판정은 서버가 보장합니다.
-        total = len(pass_criteria)
-        missing = parsed.get("missing_criteria") or []
-        # 유효 범위 밖 번호는 무시
-        valid_missing = [m for m in missing if isinstance(m, int) and 1 <= m <= total]
-        parsed["missing_criteria"] = valid_missing
+        # ── 후처리 검증: matched_path_id 가 실제 정의된 경로인지 확인 ──
+        valid_path_ids = {p["id"] for p in question.get("answer_paths", [])}
+        tier = normalize_tier(parsed.get("tier"))
+        matched_id = str(parsed.get("matched_path_id") or "").strip()
 
-        if total > 0:
-            if pass_logic == "OR":
-                # 하나 이상 충족 → pass
-                parsed["status"] = "pass" if len(valid_missing) < total else "fail"
-            else:  # AND
-                parsed["status"] = "pass" if not valid_missing else "fail"
+        if tier in ("full", "half"):
+            if matched_id not in valid_path_ids:
+                logger.warning(
+                    "AI가 보고한 matched_path_id '%s' 가 정의된 경로에 없음 → fail 처리",
+                    matched_id,
+                )
+                tier = "fail"
+                matched_id = ""
+            else:
+                # 경로 tier 와 보고된 tier 가 일치하는지 검증 (downgrade 만 허용)
+                target_path = next(
+                    (p for p in question["answer_paths"] if p["id"] == matched_id), None
+                )
+                if target_path:
+                    path_tier = normalize_tier(target_path.get("tier"))
+                    # full 경로 → half 보고는 이상하지만 그대로 두고,
+                    # half 경로 → full 보고는 path 정의를 신뢰하여 half 로 강등.
+                    if path_tier == "half" and tier == "full":
+                        tier = "half"
+                    if path_tier == "fail":
+                        tier = "fail"
 
+        parsed["tier"] = tier
+        parsed["matched_path_id"] = matched_id
+        # 호환 필드: 기존 호출자가 status 를 기대할 수 있어 함께 채움
+        parsed["status"] = "fail" if tier == "fail" else "pass"
         return parsed
 
     except ClientError as exc:
@@ -163,15 +187,7 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
 
 
 def _parse_tool_use_response(response: dict) -> dict:
-    """
-    Converse API 응답에서 tool_use 결과를 추출합니다.
-
-    Args:
-        response: Bedrock Converse API 응답
-
-    Returns:
-        {"status": "pass"|"fail", "message": "..."} 딕셔너리
-    """
+    """Converse API 응답에서 tool_use 결과를 추출합니다."""
     try:
         output = response.get("output", {})
         message = output.get("message", {})
@@ -180,81 +196,57 @@ def _parse_tool_use_response(response: dict) -> dict:
         for block in content_blocks:
             if "toolUse" in block:
                 tool_input = block["toolUse"].get("input", {})
-                status = tool_input.get("status", "fail")
+                tier = normalize_tier(tool_input.get("tier"))
                 msg = tool_input.get("message", "평가를 완료할 수 없습니다.")
-
-                # status 값 검증
-                if status not in ("pass", "fail"):
-                    logger.warning(
-                        "예상치 못한 status 값: '%s' → 'fail'로 처리합니다.", status
-                    )
-                    status = "fail"
-
+                matched_id = str(tool_input.get("matched_path_id") or "").strip()
+                missing_raw = tool_input.get("missing_aspects") or []
+                missing = [str(x).strip() for x in missing_raw if str(x).strip()]
                 return {
-                    "status": status,
+                    "tier": tier,
+                    "matched_path_id": matched_id,
                     "message": msg,
-                    "missing_criteria": _normalize_missing_criteria(
-                        tool_input.get("missing_criteria"), status
-                    ),
+                    "missing_aspects": missing,
                 }
 
-        # toolUse 블록이 없는 경우 텍스트 응답에서 추출 시도
+        # toolUse 가 없으면 텍스트 응답 파싱 시도
         for block in content_blocks:
             if "text" in block:
                 text = block["text"]
-                logger.warning("toolUse 블록 없음. 텍스트 응답에서 파싱 시도: %s", text[:100])
+                logger.warning("toolUse 블록 없음. 텍스트 응답에서 파싱 시도: %s", text[:120])
                 try:
                     parsed = json.loads(text)
-                    parsed_status = parsed.get("status", "fail")
                     return {
-                        "status": parsed_status,
-                        "message": parsed.get("message", text),
-                        "missing_criteria": _normalize_missing_criteria(
-                            parsed.get("missing_criteria"), parsed_status
-                        ),
+                        "tier": normalize_tier(parsed.get("tier")),
+                        "matched_path_id": str(parsed.get("matched_path_id") or "").strip(),
+                        "message": str(parsed.get("message") or text),
+                        "missing_aspects": [
+                            str(x).strip() for x in (parsed.get("missing_aspects") or []) if str(x).strip()
+                        ],
                     }
                 except json.JSONDecodeError:
                     return {
-                        "status": "fail",
+                        "tier": "fail",
+                        "matched_path_id": "",
                         "message": text,
-                        "missing_criteria": [],
+                        "missing_aspects": [],
                     }
 
-        # 어떤 콘텐츠 블록도 없는 경우
         logger.error("Bedrock 응답에 유효한 콘텐츠가 없습니다: %s", response)
         return {
-            "status": "fail",
+            "tier": "fail",
+            "matched_path_id": "",
             "message": "심사원의 응답을 처리할 수 없습니다. 다시 시도해 주세요.",
-            "missing_criteria": [],
+            "missing_aspects": [],
         }
 
     except (KeyError, TypeError) as exc:
         logger.error("Bedrock 응답 파싱 오류: %s", exc)
         return {
-            "status": "fail",
+            "tier": "fail",
+            "matched_path_id": "",
             "message": "응답 처리 중 오류가 발생했습니다. 다시 시도해 주세요.",
-            "missing_criteria": [],
+            "missing_aspects": [],
         }
-
-
-def _normalize_missing_criteria(raw: Any, status: str) -> list[int]:
-    """
-    AI가 반환한 missing_criteria 값을 정수 리스트로 정규화합니다.
-
-    합격(pass) 시에는 항상 빈 리스트를 반환하며, 정수로 해석할 수 없는
-    값은 걸러냅니다.
-    """
-    if status == "pass" or not isinstance(raw, list):
-        return []
-    result: list[int] = []
-    for item in raw:
-        if isinstance(item, bool):
-            continue
-        if isinstance(item, (int, float)):
-            result.append(int(item))
-        elif isinstance(item, str) and item.strip().isdigit():
-            result.append(int(item.strip()))
-    return result
 
 
 # ──────────────────────────────────────────────
@@ -277,26 +269,40 @@ def _simple_text_call(user_msg: str, system_msg: str, max_tokens: int = 512) -> 
     return ""
 
 
-def generate_question(level: int, hint: str = "") -> str:
-    """주어진 레벨의 심사 영역에 맞는 새 ISMS 심사 질문을 한 문장으로 생성합니다."""
-    level_config = config_service.get_level_config(level) or {}
-    domain = level_config.get("domain", "")
-
+def generate_scenario(isms_control_id: str, isms_control_title: str, hint: str = "") -> str:
+    """주어진 ISMS-P 항목에 대해 자연스러운 심사 시나리오 1문단을 생성."""
     user_msg = (
-        f"심사 영역: {domain}\n"
+        f"ISMS-P 항목: {isms_control_id} {isms_control_title}\n"
         f"추가 힌트: {hint or '(없음)'}\n\n"
-        "위 영역에 어울리는 ISMS 인증 심사 질문을 **한 문장**으로 작성해 주십시오. "
-        "다른 설명·번호·따옴표 없이 질문 문장만 그대로 출력하십시오."
+        "위 항목과 관련하여, 인증심사 현장에서 심사원이 지적할 만한 구체적이고 "
+        "현실적인 상황을 **한 문단(2~4문장)** 으로 작성하십시오. "
+        "AWS·SaaS·내부 시스템 등 어느 환경이든 자연스러우면 됩니다. "
+        "추가 설명·번호·따옴표 없이 본문만 출력하십시오."
     )
-    system_msg = "당신은 ISMS 인증 심사 질문을 한국어로 정확하고 자연스럽게 작성하는 보안 컨설턴트입니다."
+    system_msg = "당신은 ISMS-P 인증 심사 시나리오를 작성하는 보안 컨설턴트입니다."
+    return _simple_text_call(user_msg, system_msg)
+
+
+def generate_auditor_question(scenario: str, isms_control_title: str = "") -> str:
+    """시나리오에 어울리는 심사원 질문 한 줄을 생성."""
+    user_msg = (
+        f"관련 ISMS-P 항목: {isms_control_title or '(미지정)'}\n"
+        f"심사 시나리오:\n{scenario}\n\n"
+        "위 상황에서 심사원이 피심사자에게 던질 **한 줄 질문**을 작성하십시오. "
+        "추가 설명·번호·따옴표 없이 질문만 출력하십시오."
+    )
+    system_msg = "당신은 ISMS-P 인증 심사 질문을 정확하고 짧게 작성하는 보안 컨설턴트입니다."
     return _simple_text_call(user_msg, system_msg)
 
 
 def polish_text(text: str, kind: str = "question") -> str:
     """기존 문장을 의미는 유지한 채 더 명확하고 자연스럽게 다듬습니다."""
     kind_label = {
-        "question": "ISMS 심사 질문",
-        "criterion": "ISMS 통과 기준 한 항목",
+        "question": "ISMS-P 심사 질문",
+        "scenario": "ISMS-P 심사 시나리오 문단",
+        "rebuttal": "심사원의 반박 멘트",
+        "follow_up": "심사원의 후속 질문",
+        "criterion": "ISMS-P 통과 기준 한 항목",
     }.get(kind, "문장")
 
     user_msg = (
@@ -308,68 +314,100 @@ def polish_text(text: str, kind: str = "question") -> str:
     return _simple_text_call(user_msg, system_msg)
 
 
-# 통과 기준 생성용 도구 스키마
-_GENERATE_CRITERIA_TOOL: dict[str, Any] = {
+# ──────────────────────────────────────────────
+# 답변 경로 자동 생성 (관리자 편의 도구)
+# ──────────────────────────────────────────────
+_GENERATE_PATHS_TOOL: dict[str, Any] = {
     "toolSpec": {
-        "name": "provide_criteria",
-        "description": "ISMS 통과 기준을 3개의 짧은 한국어 항목으로 반환합니다.",
+        "name": "provide_answer_paths",
+        "description": (
+            "ISMS-P 심사 시나리오에 대한 정답 경로(answer_paths)를 절반/만점 각 1개씩 "
+            "총 2개 생성합니다. 각 경로에는 모범답안(exemplar_answer)이 반드시 포함됩니다."
+        ),
         "inputSchema": {
             "json": {
                 "type": "object",
                 "properties": {
-                    "criteria": {
+                    "answer_paths": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "각 통과 기준 항목 (정확히 3개의 짧은 문장)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "tier": {"type": "string", "enum": ["full", "half"]},
+                                "description": {"type": "string"},
+                                "trigger_keywords": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "rebuttal": {"type": "string"},
+                                "acknowledgment_keywords": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "follow_up": {"type": "string"},
+                                "compensating_keywords": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "exemplar_answer": {
+                                    "type": "string",
+                                    "description": (
+                                        "이 경로로 통과하는 모범답안 1~3문장. "
+                                        "trigger_keywords 와 보완통제(compensating/"
+                                        "acknowledgment)를 자연스럽게 녹여 작성."
+                                    ),
+                                },
+                            },
+                            "required": ["id", "tier", "trigger_keywords", "exemplar_answer"],
+                        },
                     }
                 },
-                "required": ["criteria"],
+                "required": ["answer_paths"],
             }
         },
     }
 }
 
 
-def generate_pass_criteria(question: str, domain: str = "") -> list[str]:
-    """주어진 심사 질문에 대한 ISMS 통과 기준 3가지를 생성합니다."""
+def generate_answer_paths(scenario: str, auditor_question: str, isms_control_title: str = "") -> list[dict]:
+    """시나리오/질문으로부터 half + full 답변 경로 2개를 자동 생성."""
     if _bedrock_client is None:
         raise RuntimeError("Bedrock 클라이언트가 초기화되지 않았습니다.")
 
+    user_msg = (
+        f"관련 ISMS-P 항목: {isms_control_title or '(미지정)'}\n"
+        f"시나리오:\n{scenario}\n\n"
+        f"심사원 질문: {auditor_question}\n\n"
+        "이 상황에 대한 **answer_paths 2개**를 `provide_answer_paths` 도구로 반환하십시오.\n"
+        "- 1개는 tier=\"half\": trigger_keywords(키워드 2~4개) + rebuttal(반박 한 문장) + "
+        "acknowledgment_keywords(수용 키워드 2~3개) 포함.\n"
+        "- 1개는 tier=\"full\": trigger_keywords(2~4개) + follow_up(보완통제 질문 한 문장) + "
+        "compensating_keywords(2~3개) 포함.\n"
+        "- 각 경로마다 exemplar_answer(모범답안) 1~3문장: 피심사자가 이 경로로 통과하기 "
+        "위해 실제로 답변할 만한 한국어 모범 답변을 작성하십시오. 키워드와 보완통제를 "
+        "자연스럽게 포함시켜야 합니다.\n"
+        "키워드는 짧고 명확한 한국어 명사구로 작성하십시오."
+    )
+    system_msg = (
+        "당신은 ISMS-P 인증 심사의 정답 패턴을 설계하는 보안 컨설턴트입니다. "
+        "현실적인 통제·증적·보완통제 용어를 사용하십시오."
+    )
+
     response = _bedrock_client.converse(
         modelId=config_service.get_bedrock_model_id(),
-        system=[
-            {
-                "text": (
-                    "당신은 ISMS 인증 심사 기준을 작성하는 보안 컨설턴트입니다. "
-                    "각 통과 기준은 짧고 명확한 한 줄의 한국어로 작성합니다."
-                )
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "text": (
-                            f"심사 영역: {domain or '(미지정)'}\n"
-                            f"심사 질문: {question}\n\n"
-                            "이 질문에 대한 ISMS 통과 기준 **3가지**를 "
-                            "provide_criteria 도구로 반환하십시오."
-                        )
-                    }
-                ],
-            }
-        ],
+        system=[{"text": system_msg}],
+        messages=[{"role": "user", "content": [{"text": user_msg}]}],
         toolConfig={
-            "tools": [_GENERATE_CRITERIA_TOOL],
-            "toolChoice": {"tool": {"name": "provide_criteria"}},
+            "tools": [_GENERATE_PATHS_TOOL],
+            "toolChoice": {"tool": {"name": "provide_answer_paths"}},
         },
-        inferenceConfig={"temperature": 0.5, "maxTokens": 512},
+        inferenceConfig={"temperature": 0.5, "maxTokens": 1024},
     )
 
     for block in response.get("output", {}).get("message", {}).get("content", []):
         if "toolUse" in block:
-            criteria = block["toolUse"].get("input", {}).get("criteria", [])
-            if isinstance(criteria, list):
-                return [str(c).strip() for c in criteria if str(c).strip()][:3]
+            raw_paths = block["toolUse"].get("input", {}).get("answer_paths", [])
+            if isinstance(raw_paths, list):
+                return [p for p in raw_paths if isinstance(p, dict)]
     return []

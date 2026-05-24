@@ -83,10 +83,10 @@ export default function AdminPanel({ onClose }) {
 }
 
 // ============================================================
-// 질문 관리 탭
+// 질문 관리 탭 (v2 — 풀 기반)
 // ============================================================
 function QuestionsTab({ showToast }) {
-  const [levels, setLevels] = useState(null);
+  const [stages, setStages] = useState(null);
   const [loading, setLoading] = useState(true);
   const fileInputRef = useRef(null);
 
@@ -94,7 +94,7 @@ function QuestionsTab({ showToast }) {
     setLoading(true);
     try {
       const cfg = await adminApi.getConfig();
-      setLevels(cfg.level_configs || {});
+      setStages(cfg.level_configs || {});
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -106,24 +106,14 @@ function QuestionsTab({ showToast }) {
     load();
   }, []);
 
-  const handleSaveLevel = async (level, payload) => {
-    try {
-      await adminApi.updateLevel(level, payload);
-      showToast(`Level ${level} 저장 완료`);
-      load();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  };
-
   const handleExport = () => {
-    if (!levels) return;
-    const json = JSON.stringify(levels, null, 2);
+    if (!stages) return;
+    const json = JSON.stringify(stages, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `cerberus-levels-${Date.now()}.json`;
+    a.download = `cerberus-stages-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('JSON 파일을 다운로드했습니다');
@@ -146,20 +136,17 @@ function QuestionsTab({ showToast }) {
   };
 
   if (loading) return <div className="admin-empty">불러오는 중...</div>;
-  if (!levels) return null;
+  if (!stages) return null;
 
   return (
     <div>
       <div className="admin-card">
         <h3 className="admin-card__title">JSON Import / Export</h3>
         <div className="admin-card__hint">
-          현재 모든 레벨 설정을 JSON 파일로 내보내거나, 백업 파일로부터 일괄 교체할 수 있습니다.
+          모든 스테이지 설정과 질문 풀을 JSON 으로 백업/복원할 수 있습니다.
         </div>
         <div className="admin-row-actions">
-          <button
-            className="admin-btn admin-btn--small"
-            onClick={handleExport}
-          >
+          <button className="admin-btn admin-btn--small" onClick={handleExport}>
             📤 JSON 내보내기
           </button>
           <button
@@ -178,59 +165,48 @@ function QuestionsTab({ showToast }) {
         </div>
       </div>
 
-      {[1, 2, 3].map((lv) => (
-        <LevelEditor
-          key={lv}
-          level={lv}
-          initial={levels[String(lv)] || levels[lv] || {}}
-          onSave={(payload) => handleSaveLevel(lv, payload)}
+      {[1, 2, 3].map((stage) => (
+        <StageQuestionPool
+          key={stage}
+          stage={stage}
+          stageData={stages[String(stage)] || stages[stage] || {}}
           showToast={showToast}
+          onChanged={load}
         />
       ))}
     </div>
   );
 }
 
-function LevelEditor({ level, initial, onSave, showToast }) {
-  const [domain, setDomain] = useState('');
-  const [question, setQuestion] = useState('');
-  const [criteria, setCriteria] = useState([]);
-  const [passLogic, setPassLogic] = useState('AND');
-  const [timeLimit, setTimeLimit] = useState('');
-  const [pMax, setPMax] = useState('');
+// ─── 스테이지 = 메타 + 질문 풀 (목록 + CRUD) ───
+function StageQuestionPool({ stage, stageData, showToast, onChanged }) {
+  const [meta, setMeta] = useState({
+    title: '',
+    subtitle: '',
+    time_limit: '',
+    p_max: '',
+    base_score: '',
+  });
   const [busy, setBusy] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    setDomain(initial.domain || '');
-    setQuestion(initial.question || '');
-    setCriteria([...(initial.pass_criteria || [])]);
-    setPassLogic((initial.pass_logic || 'AND').toUpperCase());
-    setTimeLimit(initial.time_limit ? String(initial.time_limit) : '');
-    setPMax(initial.p_max ? String(initial.p_max) : '');
-  }, [initial]);
+    setMeta({
+      title: stageData.title || '',
+      subtitle: stageData.subtitle || '',
+      time_limit: stageData.time_limit ? String(stageData.time_limit) : '',
+      p_max: stageData.p_max ? String(stageData.p_max) : '',
+      base_score: stageData.base_score ? String(stageData.base_score) : '',
+    });
+  }, [stageData]);
 
-  const setCriterion = (i, text) => {
-    const next = [...criteria];
-    next[i] = text;
-    setCriteria(next);
-  };
-  const addCriterion = () => setCriteria([...criteria, '']);
-  const removeCriterion = (i) =>
-    setCriteria(criteria.filter((_, idx) => idx !== i));
+  const questions = Array.isArray(stageData.questions) ? stageData.questions : [];
 
-  const handleSave = async () => {
-    if (
-      !domain.trim() ||
-      !question.trim() ||
-      criteria.length === 0 ||
-      criteria.some((c) => !c.trim())
-    ) {
-      showToast('모든 필드를 채우세요 (빈 기준 불가)', 'error');
-      return;
-    }
-    // 숫자 파싱 — 빈 값/0 은 전역 game_params 사용 의도로 0 저장
-    const tl = timeLimit === '' ? 0 : parseInt(timeLimit, 10);
-    const pm = pMax === '' ? 0 : parseInt(pMax, 10);
+  const saveMeta = async () => {
+    const tl = meta.time_limit === '' ? 0 : parseInt(meta.time_limit, 10);
+    const pm = meta.p_max === '' ? 0 : parseInt(meta.p_max, 10);
+    const bs = meta.base_score === '' ? 0 : parseInt(meta.base_score, 10);
     if (!Number.isFinite(tl) || tl < 0 || tl > 3600) {
       showToast('time_limit 은 0~3600 사이여야 합니다.', 'error');
       return;
@@ -239,59 +215,378 @@ function LevelEditor({ level, initial, onSave, showToast }) {
       showToast('p_max 는 0~100 사이여야 합니다.', 'error');
       return;
     }
+    if (!Number.isFinite(bs) || bs < 0) {
+      showToast('base_score 가 올바르지 않습니다.', 'error');
+      return;
+    }
     setBusy(true);
     try {
-      await onSave({
-        domain: domain.trim(),
-        question: question.trim(),
-        pass_criteria: criteria.map((c) => c.trim()),
-        pass_logic: passLogic,
+      await adminApi.updateStageMeta(stage, {
+        title: meta.title.trim() || undefined,
+        subtitle: meta.subtitle.trim() || undefined,
         time_limit: tl,
         p_max: pm,
+        base_score: bs,
       });
+      showToast(`Stage ${stage} 메타 저장 완료`);
+      onChanged();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (qid) => {
+    if (questions.length <= 1) {
+      showToast('스테이지에 질문이 최소 1개는 있어야 합니다.', 'error');
+      return;
+    }
+    if (!window.confirm('이 질문을 삭제할까요?')) return;
+    try {
+      await adminApi.deleteQuestion(stage, qid);
+      showToast('삭제 완료');
+      onChanged();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  return (
+    <div className="admin-card">
+      <h3 className="admin-card__title">
+        Stage {stage} — {stageData.title || '(제목 없음)'}
+      </h3>
+
+      {/* ── 메타 편집 ── */}
+      <div
+        className="admin-card__row"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 'var(--space-md)',
+        }}
+      >
+        <div>
+          <label className="admin-card__label">제목 (Title)</label>
+          <input
+            className="admin-input"
+            value={meta.title}
+            onChange={(e) => setMeta({ ...meta, title: e.target.value })}
+            disabled={busy}
+          />
+        </div>
+        <div>
+          <label className="admin-card__label">부제 (Subtitle)</label>
+          <input
+            className="admin-input"
+            value={meta.subtitle}
+            onChange={(e) => setMeta({ ...meta, subtitle: e.target.value })}
+            disabled={busy}
+          />
+        </div>
+        <div>
+          <label className="admin-card__label">제한 시간 (초)</label>
+          <input
+            type="number"
+            min="0"
+            max="3600"
+            className="admin-input"
+            placeholder="0 = 전역값 사용"
+            value={meta.time_limit}
+            onChange={(e) => setMeta({ ...meta, time_limit: e.target.value })}
+            disabled={busy}
+          />
+        </div>
+        <div>
+          <label className="admin-card__label">최대 답변 (P_MAX)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            className="admin-input"
+            placeholder="0 = 전역값 사용"
+            value={meta.p_max}
+            onChange={(e) => setMeta({ ...meta, p_max: e.target.value })}
+            disabled={busy}
+          />
+        </div>
+        <div>
+          <label className="admin-card__label">만점 기준 (Base Score)</label>
+          <input
+            type="number"
+            min="0"
+            className="admin-input"
+            value={meta.base_score}
+            onChange={(e) => setMeta({ ...meta, base_score: e.target.value })}
+            disabled={busy}
+          />
+          <span className="admin-card__hint">half 통과 시 ×0.5</span>
+        </div>
+      </div>
+      <div className="admin-row-actions" style={{ marginTop: 'var(--space-md)' }}>
+        <button
+          className="admin-btn admin-btn--primary admin-btn--small"
+          onClick={saveMeta}
+          disabled={busy}
+        >
+          💾 메타 저장
+        </button>
+      </div>
+
+      {/* ── 질문 목록 ── */}
+      <div
+        style={{
+          marginTop: 'var(--space-md)',
+          paddingTop: 'var(--space-md)',
+          borderTop: '1px dashed var(--admin-border)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 'var(--space-sm)',
+          }}
+        >
+          <strong style={{ color: 'var(--color-fire-orange)' }}>
+            질문 풀 ({questions.length}건) — 세션 시작 시 랜덤 1문제 출제
+          </strong>
+          <button
+            className="admin-btn admin-btn--small"
+            onClick={() => {
+              setEditingId(null);
+              setCreating(true);
+            }}
+            disabled={busy || creating || editingId !== null}
+          >
+            + 질문 추가
+          </button>
+        </div>
+
+        {questions.length === 0 && !creating && (
+          <div className="admin-empty">질문이 없습니다. 추가해 주세요.</div>
+        )}
+
+        {questions.map((q) =>
+          editingId === q.id ? (
+            <QuestionEditor
+              key={q.id}
+              stage={stage}
+              initial={q}
+              onCancel={() => setEditingId(null)}
+              onSaved={() => {
+                setEditingId(null);
+                onChanged();
+              }}
+              showToast={showToast}
+            />
+          ) : (
+            <div
+              key={q.id}
+              style={{
+                background: 'rgba(10,10,26,0.5)',
+                border: '1px solid var(--admin-border)',
+                padding: 'var(--space-md)',
+                marginBottom: 'var(--space-sm)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-sm)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-pixel)',
+                      fontSize: 11,
+                      color: 'var(--color-fire-orange)',
+                      marginBottom: 4,
+                    }}
+                  >
+                    {q.isms_control_id || '(ID 없음)'} {q.isms_control_title || ''}
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                    💬 {q.auditor_question}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                      marginBottom: 6,
+                    }}
+                  >
+                    🎬 {(q.scenario_context || '').slice(0, 120)}
+                    {(q.scenario_context || '').length > 120 ? '...' : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(q.answer_paths || []).map((p) => (
+                      <span
+                        key={p.id}
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 6px',
+                          background:
+                            p.tier === 'full'
+                              ? 'rgba(0, 255, 136, 0.15)'
+                              : 'rgba(255, 174, 66, 0.15)',
+                          color:
+                            p.tier === 'full'
+                              ? 'var(--color-neon-green)'
+                              : 'var(--color-fire-orange)',
+                          border: '1px solid currentColor',
+                        }}
+                        title={p.description || ''}
+                      >
+                        {p.tier} · {p.id}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+                  <button
+                    className="admin-btn admin-btn--small"
+                    onClick={() => {
+                      setCreating(false);
+                      setEditingId(q.id);
+                    }}
+                    disabled={busy || creating || editingId !== null}
+                  >
+                    ✏️ 편집
+                  </button>
+                  <button
+                    className="admin-criterion-row__del"
+                    onClick={() => handleDelete(q.id)}
+                    disabled={busy || questions.length <= 1}
+                    title={
+                      questions.length <= 1
+                        ? '풀에 최소 1개 질문이 필요합니다'
+                        : '삭제'
+                    }
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </div>
+          ),
+        )}
+
+        {creating && (
+          <QuestionEditor
+            stage={stage}
+            initial={null}
+            onCancel={() => setCreating(false)}
+            onSaved={() => {
+              setCreating(false);
+              onChanged();
+            }}
+            showToast={showToast}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── 질문 1건 편집 폼 (신규/수정 공용) ───
+function QuestionEditor({ stage, initial, onCancel, onSaved, showToast }) {
+  const isNew = !initial;
+  const [ismsId, setIsmsId] = useState('');
+  const [ismsTitle, setIsmsTitle] = useState('');
+  const [scenario, setScenario] = useState('');
+  const [question, setQuestion] = useState('');
+  const [defaultRebuttal, setDefaultRebuttal] = useState('');
+  const [paths, setPaths] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setIsmsId(initial?.isms_control_id || '');
+    setIsmsTitle(initial?.isms_control_title || '');
+    setScenario(initial?.scenario_context || '');
+    setQuestion(initial?.auditor_question || '');
+    setDefaultRebuttal(initial?.default_rebuttal || '');
+    setPaths(
+      Array.isArray(initial?.answer_paths)
+        ? initial.answer_paths.map((p) => ({ ...p }))
+        : [],
+    );
+  }, [initial]);
+
+  const updatePath = (idx, patch) => {
+    setPaths((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  };
+
+  const addPath = (tier) => {
+    setPaths((prev) => [
+      ...prev,
+      {
+        id: `${tier}-${Date.now().toString(36)}`,
+        tier,
+        description: '',
+        trigger_keywords: [],
+        exemplar_answer: '',
+        ...(tier === 'half'
+          ? { rebuttal: '', acknowledgment_keywords: [] }
+          : { follow_up: '', compensating_keywords: [] }),
+      },
+    ]);
+  };
+
+  const removePath = (idx) => {
+    setPaths((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const aiGenerateScenario = async () => {
+    if (!ismsId && !ismsTitle) {
+      showToast('ISMS-P 항목 ID 또는 제목을 먼저 입력하세요', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await adminApi.aiGenerateScenario(ismsId, ismsTitle);
+      setScenario(data.scenario);
+      showToast('AI 시나리오 생성 완료');
+    } catch (err) {
+      showToast(err.message, 'error');
     } finally {
       setBusy(false);
     }
   };
 
   const aiGenerateQuestion = async () => {
-    setBusy(true);
-    try {
-      const data = await adminApi.aiGenerateQuestion(level, domain);
-      setQuestion(data.question);
-      showToast('AI가 새 질문을 생성했습니다');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const aiPolishQuestion = async () => {
-    if (!question.trim()) return;
-    setBusy(true);
-    try {
-      const data = await adminApi.aiPolish(question, 'question');
-      setQuestion(data.text);
-      showToast('AI가 질문을 다듬었습니다');
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const aiGenerateCriteria = async () => {
-    if (!question.trim()) {
-      showToast('먼저 질문을 입력하세요', 'error');
+    if (!scenario.trim()) {
+      showToast('시나리오를 먼저 입력하세요', 'error');
       return;
     }
     setBusy(true);
     try {
-      const data = await adminApi.aiGenerateCriteria(question, domain);
-      if (Array.isArray(data.criteria) && data.criteria.length > 0) {
-        setCriteria(data.criteria);
-        showToast(`AI 통과 기준 ${data.criteria.length}개 생성 완료`);
+      const data = await adminApi.aiGenerateAuditorQuestion(scenario, ismsTitle);
+      setQuestion(data.question);
+      showToast('AI 질문 생성 완료');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const aiGeneratePaths = async () => {
+    if (!scenario.trim() || !question.trim()) {
+      showToast('시나리오와 질문을 먼저 입력하세요', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await adminApi.aiGenerateAnswerPaths(scenario, question, ismsTitle);
+      if (Array.isArray(data.answer_paths) && data.answer_paths.length > 0) {
+        setPaths(data.answer_paths);
+        showToast(`AI answer_paths ${data.answer_paths.length}개 생성 완료`);
       } else {
         showToast('AI 응답이 비어 있습니다', 'error');
       }
@@ -302,16 +597,59 @@ function LevelEditor({ level, initial, onSave, showToast }) {
     }
   };
 
-  const aiPolishCriterion = async (i) => {
-    const text = criteria[i];
-    if (!text || !text.trim()) return;
+  const handleSave = async () => {
+    if (!question.trim()) {
+      showToast('심사 질문은 필수입니다', 'error');
+      return;
+    }
+    if (paths.length === 0) {
+      showToast('answer_paths 가 최소 1개 이상 필요합니다', 'error');
+      return;
+    }
+    const payload = {
+      isms_control_id: ismsId.trim(),
+      isms_control_title: ismsTitle.trim(),
+      scenario_context: scenario.trim(),
+      auditor_question: question.trim(),
+      default_rebuttal: defaultRebuttal.trim(),
+      answer_paths: paths.map((p) => ({
+        id: p.id || `${p.tier}-${Date.now().toString(36)}`,
+        tier: p.tier,
+        description: p.description || '',
+        trigger_keywords: Array.isArray(p.trigger_keywords)
+          ? p.trigger_keywords
+          : String(p.trigger_keywords || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+        rebuttal: p.rebuttal || '',
+        acknowledgment_keywords: Array.isArray(p.acknowledgment_keywords)
+          ? p.acknowledgment_keywords
+          : String(p.acknowledgment_keywords || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+        follow_up: p.follow_up || '',
+        compensating_keywords: Array.isArray(p.compensating_keywords)
+          ? p.compensating_keywords
+          : String(p.compensating_keywords || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+        exemplar_answer: p.exemplar_answer || '',
+      })),
+    };
+
     setBusy(true);
     try {
-      const data = await adminApi.aiPolish(text, 'criterion');
-      const next = [...criteria];
-      next[i] = data.text;
-      setCriteria(next);
-      showToast('AI가 기준을 다듬었습니다');
+      if (isNew) {
+        await adminApi.addQuestion(stage, payload);
+        showToast('질문 추가 완료');
+      } else {
+        await adminApi.updateQuestion(stage, initial.id, payload);
+        showToast('질문 저장 완료');
+      }
+      onSaved();
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
@@ -320,23 +658,78 @@ function LevelEditor({ level, initial, onSave, showToast }) {
   };
 
   return (
-    <div className="admin-card">
-      <h3 className="admin-card__title">
-        Level {level} {domain && `— ${domain}`}
-      </h3>
+    <div
+      style={{
+        background: 'rgba(20,10,30,0.6)',
+        border: '1px solid var(--color-fire-orange)',
+        padding: 'var(--space-md)',
+        marginBottom: 'var(--space-sm)',
+      }}
+    >
+      <div
+        style={{
+          fontFamily: 'var(--font-pixel)',
+          fontSize: 13,
+          color: 'var(--color-fire-orange)',
+          marginBottom: 'var(--space-sm)',
+        }}
+      >
+        {isNew ? '+ 새 질문 추가' : `✏️ 질문 편집 — ${initial?.id}`}
+      </div>
 
-      <div className="admin-card__row">
-        <label className="admin-card__label">심사 영역 (Domain)</label>
-        <input
-          className="admin-input"
-          value={domain}
-          onChange={(e) => setDomain(e.target.value)}
-          disabled={busy}
-        />
+      <div
+        className="admin-card__row"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '120px 1fr',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        <div>
+          <label className="admin-card__label">ISMS-P ID</label>
+          <input
+            className="admin-input"
+            value={ismsId}
+            onChange={(e) => setIsmsId(e.target.value)}
+            placeholder="2.6.2"
+            disabled={busy}
+          />
+        </div>
+        <div>
+          <label className="admin-card__label">ISMS-P 항목 이름</label>
+          <input
+            className="admin-input"
+            value={ismsTitle}
+            onChange={(e) => setIsmsTitle(e.target.value)}
+            placeholder="정보시스템 접근"
+            disabled={busy}
+          />
+        </div>
       </div>
 
       <div className="admin-card__row">
-        <label className="admin-card__label">심사 질문 (Question)</label>
+        <label className="admin-card__label">시나리오 컨텍스트</label>
+        <textarea
+          className="admin-textarea"
+          value={scenario}
+          onChange={(e) => setScenario(e.target.value)}
+          disabled={busy}
+          rows={3}
+          placeholder="(왜 이게 심사 지적이 되었는지의 상황 설명. 한 문단)"
+        />
+        <div className="admin-row-actions">
+          <button
+            className="admin-btn admin-btn--ai admin-btn--small"
+            onClick={aiGenerateScenario}
+            disabled={busy}
+          >
+            🤖 AI 시나리오 생성
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-card__row">
+        <label className="admin-card__label">심사원 질문 (한 줄)</label>
         <textarea
           className="admin-textarea"
           value={question}
@@ -348,126 +741,76 @@ function LevelEditor({ level, initial, onSave, showToast }) {
           <button
             className="admin-btn admin-btn--ai admin-btn--small"
             onClick={aiGenerateQuestion}
-            disabled={busy}
+            disabled={busy || !scenario.trim()}
           >
-            🤖 AI 생성
+            🤖 AI 질문 생성
           </button>
-          <button
-            className="admin-btn admin-btn--ai admin-btn--small"
-            onClick={aiPolishQuestion}
-            disabled={busy || !question.trim()}
-          >
-            ✨ AI 다듬기
-          </button>
-        </div>
-      </div>
-
-      {/* ── 난이도 조정 (단계별 한도 + 통과 판정 방식) ── */}
-      <div
-        className="admin-card__row"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 'var(--space-md)',
-          marginTop: 'var(--space-md)',
-          paddingTop: 'var(--space-md)',
-          borderTop: '1px dashed var(--admin-border)',
-        }}
-      >
-        <div>
-          <label className="admin-card__label">통과 판정 방식 (Pass Logic)</label>
-          <select
-            className="admin-input"
-            value={passLogic}
-            onChange={(e) => setPassLogic(e.target.value)}
-            disabled={busy}
-          >
-            <option value="AND">AND — 모든 기준 충족 필요 (엄격)</option>
-            <option value="OR">OR — 한 개 이상 충족 시 통과 (관대)</option>
-          </select>
-          <span className="admin-card__hint">
-            난이도를 좌우합니다. Stage 3 는 AND 권장.
-          </span>
-        </div>
-        <div>
-          <label className="admin-card__label">제한 시간 (초)</label>
-          <input
-            type="number"
-            min="0"
-            max="3600"
-            className="admin-input"
-            value={timeLimit}
-            placeholder="0 = 전역값 사용"
-            onChange={(e) => setTimeLimit(e.target.value)}
-            disabled={busy}
-          />
-          <span className="admin-card__hint">
-            0/빈칸이면 게임 설정 탭의 TIME_LIMIT 사용
-          </span>
-        </div>
-        <div>
-          <label className="admin-card__label">최대 답변 횟수 (P_MAX)</label>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            className="admin-input"
-            value={pMax}
-            placeholder="0 = 전역값 사용"
-            onChange={(e) => setPMax(e.target.value)}
-            disabled={busy}
-          />
-          <span className="admin-card__hint">
-            낮을수록 어려움 (Stage 3 = 6 권장)
-          </span>
         </div>
       </div>
 
       <div className="admin-card__row">
-        <label className="admin-card__label">통과 기준 (Pass Criteria)</label>
-        {criteria.map((c, i) => (
-          <div key={i} className="admin-criterion-row">
-            <span className="admin-criterion-row__index">{i + 1}.</span>
-            <input
-              className="admin-input"
-              value={c}
-              onChange={(e) => setCriterion(i, e.target.value)}
+        <label className="admin-card__label">기본 반박 멘트 (어떤 경로에도 안 걸릴 때)</label>
+        <input
+          className="admin-input"
+          value={defaultRebuttal}
+          onChange={(e) => setDefaultRebuttal(e.target.value)}
+          placeholder="근거가 부족합니다.."
+          disabled={busy}
+        />
+      </div>
+
+      {/* answer_paths */}
+      <div
+        style={{
+          marginTop: 'var(--space-md)',
+          paddingTop: 'var(--space-sm)',
+          borderTop: '1px dashed var(--admin-border)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginBottom: 'var(--space-sm)',
+          }}
+        >
+          <strong style={{ color: 'var(--color-fire-orange)' }}>
+            Answer Paths ({paths.length})
+          </strong>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              className="admin-btn admin-btn--small"
+              onClick={() => addPath('half')}
               disabled={busy}
-            />
+            >
+              + half 경로
+            </button>
+            <button
+              className="admin-btn admin-btn--small"
+              onClick={() => addPath('full')}
+              disabled={busy}
+            >
+              + full 경로
+            </button>
             <button
               className="admin-btn admin-btn--ai admin-btn--small"
-              onClick={() => aiPolishCriterion(i)}
-              disabled={busy || !c.trim()}
-              title="이 기준만 AI로 다듬기"
+              onClick={aiGeneratePaths}
+              disabled={busy || !scenario.trim() || !question.trim()}
             >
-              ✨
-            </button>
-            <button
-              className="admin-criterion-row__del"
-              onClick={() => removeCriterion(i)}
-              disabled={busy}
-              title="기준 삭제"
-            >
-              ✕
+              🤖 AI 경로 2개 생성
             </button>
           </div>
-        ))}
-        <div className="admin-row-actions">
-          <button
-            className="admin-btn admin-btn--small"
-            onClick={addCriterion}
-            disabled={busy}
-          >
-            + 기준 추가
-          </button>
-          <button
-            className="admin-btn admin-btn--ai admin-btn--small"
-            onClick={aiGenerateCriteria}
-            disabled={busy || !question.trim()}
-          >
-            🤖 AI 기준 3개 생성
-          </button>
         </div>
+
+        {paths.map((p, idx) => (
+          <AnswerPathEditor
+            key={idx}
+            path={p}
+            onChange={(patch) => updatePath(idx, patch)}
+            onRemove={() => removePath(idx)}
+            disabled={busy}
+          />
+        ))}
       </div>
 
       <div className="admin-row-actions" style={{ marginTop: 'var(--space-md)' }}>
@@ -478,6 +821,185 @@ function LevelEditor({ level, initial, onSave, showToast }) {
         >
           💾 저장
         </button>
+        <button className="admin-btn admin-btn--small" onClick={onCancel} disabled={busy}>
+          취소
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── answer_path 1건 편집 폼 ───
+function AnswerPathEditor({ path, onChange, onRemove, disabled }) {
+  const isHalf = path.tier === 'half';
+  const isFull = path.tier === 'full';
+
+  const kwToString = (kws) =>
+    Array.isArray(kws) ? kws.join(', ') : String(kws || '');
+
+  return (
+    <div
+      style={{
+        background: 'rgba(0,0,0,0.35)',
+        border: `1px solid ${
+          isFull
+            ? 'var(--color-neon-green, #00ff88)'
+            : isHalf
+            ? 'var(--color-fire-orange, #ffae42)'
+            : 'var(--admin-border)'
+        }`,
+        padding: 'var(--space-sm)',
+        marginBottom: 'var(--space-sm)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 'var(--space-sm)',
+          marginBottom: 6,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <select
+            className="admin-input"
+            style={{ width: 90 }}
+            value={path.tier}
+            onChange={(e) => onChange({ tier: e.target.value })}
+            disabled={disabled}
+          >
+            <option value="full">full</option>
+            <option value="half">half</option>
+          </select>
+          <input
+            className="admin-input"
+            style={{ width: 200 }}
+            value={path.id || ''}
+            onChange={(e) => onChange({ id: e.target.value })}
+            placeholder="path id (예: full-api-sync)"
+            disabled={disabled}
+          />
+        </div>
+        <button
+          className="admin-criterion-row__del"
+          onClick={onRemove}
+          disabled={disabled}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="admin-card__row">
+        <label className="admin-card__label">설명</label>
+        <input
+          className="admin-input"
+          value={path.description || ''}
+          onChange={(e) => onChange({ description: e.target.value })}
+          disabled={disabled}
+        />
+      </div>
+
+      <div className="admin-card__row">
+        <label className="admin-card__label">
+          Trigger Keywords (쉼표로 구분)
+        </label>
+        <input
+          className="admin-input"
+          value={kwToString(path.trigger_keywords)}
+          onChange={(e) =>
+            onChange({
+              trigger_keywords: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }
+          placeholder="패치, 패키지 업데이트"
+          disabled={disabled}
+        />
+      </div>
+
+      {isHalf && (
+        <>
+          <div className="admin-card__row">
+            <label className="admin-card__label">Rebuttal (반박 멘트)</label>
+            <textarea
+              className="admin-textarea"
+              rows={2}
+              value={path.rebuttal || ''}
+              onChange={(e) => onChange({ rebuttal: e.target.value })}
+              disabled={disabled}
+            />
+          </div>
+          <div className="admin-card__row">
+            <label className="admin-card__label">
+              Acknowledgment Keywords (쉼표) — 1개 이상 충족 시 half 확정
+            </label>
+            <input
+              className="admin-input"
+              value={kwToString(path.acknowledgment_keywords)}
+              onChange={(e) =>
+                onChange({
+                  acknowledgment_keywords: e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="반영, 검토하겠습니다, 개선"
+              disabled={disabled}
+            />
+          </div>
+        </>
+      )}
+
+      {isFull && (
+        <>
+          <div className="admin-card__row">
+            <label className="admin-card__label">Follow-up (후속 질문)</label>
+            <textarea
+              className="admin-textarea"
+              rows={2}
+              value={path.follow_up || ''}
+              onChange={(e) => onChange({ follow_up: e.target.value })}
+              disabled={disabled}
+            />
+          </div>
+          <div className="admin-card__row">
+            <label className="admin-card__label">
+              Compensating Keywords (쉼표) — 모두 충족해야 full 확정
+            </label>
+            <input
+              className="admin-input"
+              value={kwToString(path.compensating_keywords)}
+              onChange={(e) =>
+                onChange({
+                  compensating_keywords: e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder="위험평가, 경영진 승인"
+              disabled={disabled}
+            />
+          </div>
+        </>
+      )}
+
+      {/* 모든 tier 공통 — 모범답안 */}
+      <div className="admin-card__row">
+        <label className="admin-card__label">
+          ★ 모범답안 (Exemplar Answer) — 결과 화면에서 학습용으로 노출됨
+        </label>
+        <textarea
+          className="admin-textarea"
+          rows={3}
+          value={path.exemplar_answer || ''}
+          onChange={(e) => onChange({ exemplar_answer: e.target.value })}
+          disabled={disabled}
+          placeholder="이 경로로 통과하는 모범 답변(1~3문장). 키워드와 보완통제를 자연스럽게 포함."
+        />
       </div>
     </div>
   );

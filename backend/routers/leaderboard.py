@@ -2,8 +2,12 @@
 Cerberus: The Dark Auditor - 리더보드 라우터
 
 리더보드 조회 및 점수 제출 API 엔드포인트를 정의합니다.
-각 단계가 독립 세션이므로, 제출 시 모든 단계 세션 ID 를 함께 보내고
+각 단계가 독립 세션이므로, 제출 시 클리어한 단계의 세션 ID 를 함께 보내고
 백엔드가 합산하여 등록합니다.
+
+등록 조건 (v2):
+  - 클리어한 단계가 1개 이상이고 누적 점수가 1점 이상이면 등록 가능.
+    (게임오버여도 일부 단계만 클리어했다면 그 점수로 등록 가능)
 """
 
 from __future__ import annotations
@@ -39,43 +43,41 @@ async def get_leaderboard() -> list[LeaderboardEntry]:
 
 @router.post(
     "",
-    summary="점수 제출 (모든 단계 합산)",
+    summary="점수 제출 (클리어한 단계 합산)",
     description=(
-        "모든 단계를 클리어한 세션 ID 목록을 받아, 점수와 소요 시간을 "
-        "합산하여 리더보드에 등록합니다."
+        "클리어한 단계의 세션 ID 목록을 받아 점수와 소요 시간을 합산해 등록합니다. "
+        "전체 3단계를 모두 클리어하지 않았어도, 1점 이상 누적이면 등록 가능합니다."
     ),
 )
 async def submit_score(request: LeaderboardSubmitRequest) -> dict:
     total_score = 0
     total_time = 0.0
     levels_seen: set[int] = set()
+    accepted_levels: list[int] = []
 
     for sid in request.session_ids:
         session = game_service.get_session(sid)
         if session is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"세션을 찾을 수 없습니다: {sid[:8]}...",
-            )
+            # 존재하지 않는 세션은 조용히 무시 (게임오버 시 미클리어 세션 포함될 수 있음)
+            logger.info("submit_score: 세션 미존재로 건너뜀: %s", sid[:8] if sid else "")
+            continue
         if not session.is_completed or not session.is_cleared or session.final_score is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"클리어하지 않은 세션이 포함되어 있습니다 (level={session.level}).",
-            )
+            # 클리어하지 않은 세션도 무시 (시간/시도 초과로 끝난 세션 등)
+            continue
         if session.level in levels_seen:
             raise HTTPException(
                 status_code=400,
                 detail=f"동일 레벨의 세션이 중복되었습니다: level {session.level}",
             )
         levels_seen.add(session.level)
+        accepted_levels.append(session.level)
         total_score += int(session.final_score)
         total_time += float(session.time_used)
 
-    if levels_seen != {1, 2, 3}:
-        missing = sorted({1, 2, 3} - levels_seen)
+    if total_score < 1 or not accepted_levels:
         raise HTTPException(
             status_code=400,
-            detail=f"모든 단계(1·2·3)를 클리어해야 등록할 수 있습니다. 누락: {missing}",
+            detail="등록 가능한 점수가 없습니다. 최소 한 단계 이상 클리어해야 합니다.",
         )
 
     try:
@@ -93,12 +95,14 @@ async def submit_score(request: LeaderboardSubmitRequest) -> dict:
                 ),
                 "score": total_score,
                 "time_used": total_time,
+                "cleared_levels": sorted(accepted_levels),
             }
         return {
             "success": False,
             "message": "아쉽게도 상위 10위 안에 들지 못했습니다. 다음에 도전해 주세요!",
             "score": total_score,
             "time_used": total_time,
+            "cleared_levels": sorted(accepted_levels),
         }
     except Exception as exc:
         logger.error("점수 등록 실패: %s", exc)

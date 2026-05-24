@@ -1,157 +1,234 @@
 """
-Cerberus: The Dark Auditor - 심사원 프롬프트 및 레벨 설정
+Cerberus: The Dark Auditor - 심사원 프롬프트 및 시나리오 기반 질문 풀
 
-각 레벨의 심사 영역·질문·통과 기준·통과 판정 방식(AND/OR)·시간/프롬프트 한도를
-정의하고, 이를 system prompt 로 렌더링하는 템플릿을 제공합니다.
+설계 (v2 — 시나리오·답변경로 기반)
+─────────────────────────────────
+이 게임은 ISMS-P 인증 심사 상황을 시뮬레이션합니다. 각 스테이지는 ISMS-P
+영역(1.x 관리체계 / 2.x 보호대책 / 3.x 개인정보)에 대응하는 **질문 풀**을
+가지며, 세션 시작 시 풀에서 무작위로 1문제가 출제됩니다.
 
-LEVEL_CONFIGS 는 **코드 기본값**입니다. 관리자 페이지에서 런타임에 수정된
-설정이 있으면 `config_service` 가 그 값을 우선 사용하고, 없으면 여기 값으로
-시드됩니다.
+질문 한 건의 핵심 구성:
 
-설계 노트
-─────────
-- 각 단계는 **독립적인 세션**으로 운영됩니다. 한 단계가 끝나면 화면과
-  세션이 모두 초기화되고 다음 단계의 새 세션이 시작됩니다.
-- `pass_logic` 으로 각 단계의 통과 판정 방식을 선택할 수 있습니다.
-    * "AND" — 모든 통과 기준을 충족해야 합격 (엄격)
-    * "OR"  — 통과 기준 중 하나 이상을 충족하면 합격 (관대)
-- `time_limit` / `p_max` 가 비어 있으면 전역 game_params 값을 사용합니다.
-- Level 3 은 의도적으로 **멀티 프롬프트 (여러 차례의 후속 질문)** 없이는
-  통과하기 어렵도록 통과 기준 개수와 p_max 가 설정되어 있습니다.
+  - isms_control_id / isms_control_title  : 근거 ISMS-P 항목 (예: 2.6.2)
+  - scenario_context                       : "왜 이게 지적되었나" — 설정 상황
+  - auditor_question                       : 심사원이 던지는 한 줄 질문
+  - answer_paths[]                         : 답변 경로들
+       · tier="full"  → 만점 + 단계 통과
+       · tier="half"  → 절반 점수 + 단계 통과
+       · trigger_keywords : 이 경로로 라우팅되는 키워드
+       · follow_up        : (full 경로) 심사원의 후속 질문
+       · compensating_keywords : (full) 보완통제 키워드 — 모두 포함되어야 만점
+       · rebuttal              : (half) 심사원의 반박
+       · acknowledgment_keywords : (half) 수용 키워드 — 하나라도 포함되면 half 확정
+  - default_rebuttal                       : 어떤 경로에도 안 걸리면 던질 멘트
+
+평가는 Bedrock 의 `evaluate_answer` 도구로 수행하며, 응답에는
+  · tier   ("full" | "half" | "fail")
+  · matched_path_id  (full/half 시)
+  · missing_aspects  (fail 시 무엇이 부족했는지 사람이 읽을 한국어)
+가 담깁니다. 서버는 이 tier 를 그대로 사용해 점수와 단계 전환을 결정합니다.
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 
 # ──────────────────────────────────────────────
 # System Prompt 템플릿
 # ──────────────────────────────────────────────
-SYSTEM_PROMPT_TEMPLATE = """당신은 ISMS(정보보호관리체계) 인증 심사원 '케르베로스'입니다.
-당신의 역할은 엄격하지만 공정한 심사원으로서 피심사자의 답변을 평가하는 것입니다.
+SYSTEM_PROMPT_TEMPLATE = """당신은 ISMS-P(정보보호 및 개인정보보호 관리체계) 인증 심사원 '케르베로스'입니다.
+실제 인증심사의 엄격한 기준으로 피심사자(게임 플레이어)의 답변을 평가합니다.
 
-## 현재 심사 영역
-{domain}
+## 근거 ISMS-P 항목
+{isms_control_id} {isms_control_title}
 
-## 심사 질문
-{question}
+## 현재 심사 상황(시나리오)
+{scenario_context}
 
-## 통과 기준 (각 항목별로 개별 평가)
-{criteria_list}
+## 당신이 방금 던진 질문
+"{auditor_question}"
 
-## 통과 판정 방식
-{pass_logic_explanation}
+## 채점 규칙 — 답변 경로(answer paths)
+플레이어의 답변은 아래 정의된 경로 중 하나로만 분류되며, 그 외에는 **모두 불합격(fail)** 입니다.
+키워드는 "정확히 그 단어가 등장해야" 인정되는 것이 아니라, **명백히 같은 개념**이 답변에 드러나야 인정됩니다.
+모호한 일반론·근거 없는 단정·예시 없는 추상적 답변은 절대 인정하지 마십시오.
+
+{answer_paths_block}
 
 ## 절대 규칙
-- 절대로 정답이나 통과 기준을 먼저 알려주지 마십시오.
-- 피심사자가 부족한 답변을 하면 추가 질문을 통해 보완할 기회를 주십시오.
-- 반드시 한국어로 응답하십시오.
-- 평가 결과는 반드시 evaluate_answer 도구를 사용하여 구조화된 형식으로 반환하십시오.
-- 각 통과 기준에 대해 **개별적으로** 충족 여부를 판단하고, 충족하지 못한 항목의
-  번호를 evaluate_answer 도구의 missing_criteria 배열에 담으십시오. 모든 기준을
-  충족했으면 빈 배열 [] 을 반환하십시오.
-- status 값은 위의 "통과 판정 방식" 규칙을 따라 결정하십시오.
-- fail 인 경우 어떤 부분이 부족한지 힌트를 주되, 직접적인 정답은 알려주지 마십시오.
+- 답변이 위 경로 중 어떤 것에도 해당하지 않으면 tier="fail" 로 평가하고, 직접 정답을 알려주지 마십시오.
+  대신 시나리오 맥락에서 더 구체적인 근거·통제·증적이 필요하다는 점을 한국어로 짧게 지적해 주십시오.
+  (참고 멘트: "{default_rebuttal}")
+- half 경로의 경우: 플레이어의 **이번 답변**이 trigger_keywords 에 해당하지만 아직 acknowledgment_keywords
+  가 보이지 않으면 tier="fail" 로 두고, message 에 rebuttal 을 그대로 또는 비슷한 톤으로 던져 후속
+  답변을 유도하십시오. 같은 세션의 **누적 대화**에서 trigger 와 acknowledgment 가 모두 나타났다면
+  tier="half" 로 판정하십시오.
+- full 경로도 동일: trigger_keywords 만 나오고 compensating_keywords 가 안 보이면 tier="fail" 로 두고
+  follow_up 을 던지십시오. 누적 대화에서 trigger 와 compensating 이 모두 나타났다면 tier="full".
+- 한 답변에 full 의 trigger + compensating 이 한 번에 등장하면 즉시 tier="full".
+- half 와 full 경로가 동시에 만족되면 더 높은 tier(full)를 채택합니다.
+- 반드시 한국어로 응답하십시오. 평가 결과는 반드시 `evaluate_answer` 도구로 반환하십시오.
+- message 는 심사원의 톤(차분·공식·약간 강한 어조)을 유지하고 2~4문장 이내로 작성하십시오.
 """
 
-PASS_LOGIC_EXPLANATIONS: dict[str, str] = {
-    "AND": (
-        "위 통과 기준을 **모두** 충족해야 합격(pass)입니다. "
-        "단 하나라도 충족하지 못하면 불합격(fail) 입니다."
-    ),
-    "OR": (
-        "위 통과 기준 중 **하나 이상**을 충족하면 합격(pass)입니다. "
-        "모든 기준을 충족하지 못한 경우에만 불합격(fail) 입니다."
-    ),
-}
+
+def _render_answer_paths_block(answer_paths: list[dict]) -> str:
+    """answer_paths 를 system prompt 에 넣을 텍스트로 렌더링."""
+    lines: list[str] = []
+    for idx, path in enumerate(answer_paths, start=1):
+        tier = path.get("tier", "fail")
+        pid = path.get("id", f"path-{idx}")
+        desc = path.get("description", "")
+        triggers = path.get("trigger_keywords") or []
+        lines.append(
+            f"### 경로 {idx} — id=\"{pid}\" / tier={tier}\n"
+            f"- 설명: {desc}"
+        )
+        if triggers:
+            lines.append(f"- trigger_keywords: {triggers}")
+        if tier == "half":
+            ack = path.get("acknowledgment_keywords") or []
+            rebuttal = path.get("rebuttal", "")
+            if rebuttal:
+                lines.append(f"- rebuttal(반박 멘트): \"{rebuttal}\"")
+            if ack:
+                lines.append(f"- acknowledgment_keywords(수용 키워드, 1개 이상): {ack}")
+        if tier == "full":
+            comp = path.get("compensating_keywords") or []
+            follow_up = path.get("follow_up", "")
+            if follow_up:
+                lines.append(f"- follow_up(후속 질문): \"{follow_up}\"")
+            if comp:
+                lines.append(f"- compensating_keywords(보완통제, 모두 충족): {comp}")
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
-def normalize_pass_logic(value: object) -> str:
-    """문자열을 'AND' / 'OR' 로 정규화. 알 수 없으면 'AND'."""
-    if isinstance(value, str):
-        upper = value.strip().upper()
-        if upper in ("AND", "OR"):
-            return upper
-    return "AND"
-
-
-def render_system_prompt(
-    domain: str,
-    question: str,
-    pass_criteria: list[str],
-    pass_logic: str = "AND",
-) -> str:
-    """레벨 설정으로부터 system prompt 텍스트를 생성합니다."""
-    criteria_text = "\n".join(
-        f"{i}. {c}" for i, c in enumerate(pass_criteria or [], start=1)
-    )
-    logic = normalize_pass_logic(pass_logic)
-    explanation = PASS_LOGIC_EXPLANATIONS[logic]
+def render_system_prompt(question: dict) -> str:
+    """질문(dict) 1건으로부터 system prompt 텍스트를 생성합니다."""
     return SYSTEM_PROMPT_TEMPLATE.format(
-        domain=domain,
-        question=question,
-        criteria_list=criteria_text,
-        pass_logic_explanation=explanation,
+        isms_control_id=question.get("isms_control_id", ""),
+        isms_control_title=question.get("isms_control_title", ""),
+        scenario_context=question.get("scenario_context", ""),
+        auditor_question=question.get("auditor_question", ""),
+        answer_paths_block=_render_answer_paths_block(question.get("answer_paths", [])),
+        default_rebuttal=question.get("default_rebuttal", "근거가 부족합니다. 좀 더 구체적인 통제·증적을 제시해 주십시오."),
     )
 
 
 # ──────────────────────────────────────────────
-# 레벨별 기본 설정 (관리자가 수정하지 않았을 때의 시드값)
-#
-# 난이도 곡선:
-#   Level 1 — 워밍업.   기준 3개 · AND · 충분한 p_max(10)
-#   Level 2 — 본 게임.  기준 4개 · AND · 중간 p_max(8) — 정책 여러 측면 묶음 질문
-#   Level 3 — 보스전.   기준 5개 · AND · 빠듯한 p_max(6) — 단일 답변으론 통과 불가,
-#                         반드시 여러 차례의 후속 답변(멀티 프롬프트)이 필요.
+# 정규화 헬퍼
 # ──────────────────────────────────────────────
-LEVEL_CONFIGS: dict[int, dict] = {
-    # ────────── Level 1: 물리적 보안 / 단말기 보안 ──────────
+ALLOWED_TIERS = ("full", "half", "fail")
+
+
+def normalize_tier(value: object) -> str:
+    if isinstance(value, str):
+        lower = value.strip().lower()
+        if lower in ALLOWED_TIERS:
+            return lower
+    return "fail"
+
+
+def normalize_answer_path(raw: dict) -> dict:
+    """answer_path 한 건을 표준 형태로 정규화."""
+    tier = normalize_tier(raw.get("tier"))
+    out: dict[str, Any] = {
+        "id": str(raw.get("id") or "").strip() or f"path-{tier}",
+        "tier": tier,
+        "description": str(raw.get("description") or "").strip(),
+        "trigger_keywords": [str(k).strip() for k in (raw.get("trigger_keywords") or []) if str(k).strip()],
+        # 모범답안 — 단계 종료 후 학습용으로 노출되는 "이렇게 답하면 통과" 한 줄.
+        "exemplar_answer": str(raw.get("exemplar_answer") or "").strip(),
+    }
+    if tier == "half":
+        out["rebuttal"] = str(raw.get("rebuttal") or "").strip()
+        out["acknowledgment_keywords"] = [
+            str(k).strip() for k in (raw.get("acknowledgment_keywords") or []) if str(k).strip()
+        ]
+    elif tier == "full":
+        out["follow_up"] = str(raw.get("follow_up") or "").strip()
+        out["compensating_keywords"] = [
+            str(k).strip() for k in (raw.get("compensating_keywords") or []) if str(k).strip()
+        ]
+    return out
+
+
+def normalize_question(raw: dict) -> dict:
+    """질문 1건을 표준 형태로 정규화."""
+    return {
+        "id": str(raw.get("id") or "").strip(),
+        "isms_control_id": str(raw.get("isms_control_id") or "").strip(),
+        "isms_control_title": str(raw.get("isms_control_title") or "").strip(),
+        "scenario_context": str(raw.get("scenario_context") or "").strip(),
+        "auditor_question": str(raw.get("auditor_question") or "").strip(),
+        "answer_paths": [
+            normalize_answer_path(p) for p in (raw.get("answer_paths") or [])
+            if isinstance(p, dict)
+        ],
+        "default_rebuttal": str(
+            raw.get("default_rebuttal")
+            or "근거가 부족합니다. 좀 더 구체적인 통제·증적을 제시해 주십시오."
+        ).strip(),
+    }
+
+
+# ──────────────────────────────────────────────
+# 스테이지 메타 + 기본 질문 풀 (시드)
+#
+# 각 스테이지는 ISMS-P 의 한 대분류에 대응합니다.
+#   Stage 1 — 1.x 관리체계 수립 및 운영
+#   Stage 2 — 2.x 보호대책 요구사항
+#   Stage 3 — 3.x 개인정보 처리 단계별 요구사항
+#
+# 시드 질문 풀은 별도 파일(seed_questions.py)에서 관리됩니다.
+# 각 ISMS-P 중분류(1.1~1.4, 2.1~2.12, 3.1~3.5)에 최소 1개 이상의 시드를 둡니다.
+# ──────────────────────────────────────────────
+from prompts.seed_questions import DEFAULT_QUESTIONS_BY_STAGE  # noqa: E402  (after constants)
+
+STAGE_DEFAULTS: dict[int, dict[str, Any]] = {
     1: {
-        "domain": "물리적 보안 / 단말기 보안",
-        "question": (
-            "직원들이 자리를 비울 때 PC 화면 보호 조치는 어떻게 하고 계십니까?"
-        ),
-        "pass_criteria": [
-            "화면 잠금(보호기) 설정 여부",
-            "비밀번호를 통한 해제 방식",
-            "5분 이내 자동 잠금 설정",
-        ],
-        "pass_logic": "AND",
+        "title": "관리체계 수립 및 운영",
+        "subtitle": "ISMS-P 1.x 영역",
         "time_limit": 240,
-        "p_max": 10,
+        "p_max": 8,
+        "base_score": 1000,
+        "questions": DEFAULT_QUESTIONS_BY_STAGE[1],
     },
-    # ────────── Level 2: 접근 통제 / 계정 관리 ──────────
     2: {
-        "domain": "접근 통제 / 계정 관리",
-        "question": (
-            "서버 및 DB 에 접근하는 관리자 계정의 (1) 비밀번호 구성·변경 정책, "
-            "(2) 신규 권한 부여 절차, (3) 퇴직·인사이동 발생 시 계정 처리 방식을 "
-            "모두 포함하여 설명해 주십시오."
-        ),
-        "pass_criteria": [
-            "영문·숫자·특수문자 조합과 8자 이상 최소 길이를 만족하는 비밀번호 구성",
-            "분기 1회 이상 주기적 비밀번호 변경 정책",
-            "신규 권한 부여 시 책임자 승인 절차 운영",
-            "퇴직·인사이동 발생 시 24시간 이내 계정 비활성화·회수",
-        ],
-        "pass_logic": "AND",
+        "title": "보호대책 요구사항",
+        "subtitle": "ISMS-P 2.x 영역",
         "time_limit": 300,
         "p_max": 8,
+        "base_score": 1500,
+        "questions": DEFAULT_QUESTIONS_BY_STAGE[2],
     },
-    # ────────── Level 3: 네트워크 보안 / 침해사고 대응 ──────────
     3: {
-        "domain": "네트워크 보안 / 침해사고 대응",
-        "question": (
-            "개인정보가 저장된 운영 DB 에 대해 다음 세 가지를 **모두** 설명해 "
-            "주십시오. (1) 평시 접근 통제·로그 리뷰 정책, (2) 침해사고 의심 시 "
-            "초동 대응 절차, (3) 법정 신고 의무와 사후 재발 방지 대책."
-        ),
-        "pass_criteria": [
-            "방화벽·접근제어 솔루션을 통한 네트워크 분리 및 비인가자 차단 정책",
-            "독립된 보안 관리자가 DB 접근 로그를 월 1회 이상 정기 리뷰",
-            "침해사고 발생 시 즉시 격리·증거 보존(포렌식 대비) 초동 절차",
-            "사고 인지 후 24시간 이내 한국인터넷진흥원(KISA) 신고 및 영향받은 이용자 통지",
-            "사고 원인 분석 후 재발 방지 대책 수립 및 절차 문서화",
-        ],
-        "pass_logic": "AND",
+        "title": "개인정보 처리 단계별 요구사항",
+        "subtitle": "ISMS-P 3.x 영역",
         "time_limit": 360,
         "p_max": 6,
+        "base_score": 2000,
+        "questions": DEFAULT_QUESTIONS_BY_STAGE[3],
     },
 }
+
+
+def get_default_stage_meta(stage: int) -> dict[str, Any]:
+    """스테이지의 기본 메타(질문 풀 제외)를 반환."""
+    raw = STAGE_DEFAULTS.get(stage, {})
+    return {
+        "title": raw.get("title", f"Stage {stage}"),
+        "subtitle": raw.get("subtitle", ""),
+        "time_limit": int(raw.get("time_limit", 300)),
+        "p_max": int(raw.get("p_max", 8)),
+        "base_score": int(raw.get("base_score", 1000)),
+    }
+
+
+def get_default_questions(stage: int) -> list[dict]:
+    """스테이지의 기본 질문 풀(시드)을 정규화하여 반환."""
+    raw = STAGE_DEFAULTS.get(stage, {})
+    questions = raw.get("questions") or []
+    return [normalize_question(q) for q in questions]

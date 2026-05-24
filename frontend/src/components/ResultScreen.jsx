@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import './ResultScreen.css';
 import { getGrade, formatTime } from '../utils/scoring';
+import ExemplarPanel from './ExemplarPanel';
 
 /**
  * ResultScreen - 모든 단계 클리어 결과 화면
@@ -60,6 +61,16 @@ export default function ResultScreen({
             <div key={s.level} className="result-screen__breakdown-row">
               <span className="result-screen__breakdown-label">
                 🎯 STAGE {s.level}
+                {s.tier === 'full' && (
+                  <span style={{ marginLeft: 8, color: 'var(--color-neon-green, #00ff88)' }}>
+                    ★ 만점
+                  </span>
+                )}
+                {s.tier === 'half' && (
+                  <span style={{ marginLeft: 8, color: 'var(--color-fire-orange, #ffae42)' }}>
+                    ◇ 절반
+                  </span>
+                )}
               </span>
               <span className="result-screen__breakdown-value">
                 +{s.score}점 · {formatTime(Math.round(s.time_used))} · {s.prompt_count}회
@@ -109,6 +120,15 @@ export default function ResultScreen({
             </div>
           )}
         </div>
+
+        {/* 모범답안 토글 */}
+        <ExemplarPanel
+          sessions={clearedStages.map((s) => ({
+            level: s.level,
+            session_id: s.session_id,
+            tier: s.tier,
+          }))}
+        />
 
         {/* 액션 버튼들 */}
         <div className="result-screen__actions">

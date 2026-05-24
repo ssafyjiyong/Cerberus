@@ -3,12 +3,17 @@ Cerberus: The Dark Auditor - 관리자 라우터
 
 게임 설정·문제·리더보드를 런타임에 관리하는 비공개 API.
 모든 엔드포인트는 `/api/admin/auth/login` 으로 발급받은 베어러 토큰이 필요합니다.
+
+v2 — 질문 풀 기반:
+  - 스테이지 = 3개 고정 (1·2·3)
+  - 각 스테이지는 메타(title/p_max/time_limit/base_score) + 질문 풀(N개)
+  - 질문 단위 CRUD: GET/POST/PUT/DELETE /config/stages/{stage}/questions
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -52,21 +57,36 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(..., min_length=4, max_length=128)
 
 
-class LevelConfigUpdate(BaseModel):
-    domain: Optional[str] = None
-    question: Optional[str] = None
-    pass_criteria: Optional[list[str]] = None
-    pass_logic: Optional[str] = Field(
-        default=None, description="통과 판정 방식: AND 또는 OR"
-    )
-    time_limit: Optional[int] = Field(
-        default=None, ge=0, le=3600,
-        description="단계별 제한 시간(초). 0 이면 전역 game_params 값을 사용",
-    )
-    p_max: Optional[int] = Field(
-        default=None, ge=0, le=100,
-        description="단계별 최대 답변 횟수. 0 이면 전역 game_params 값을 사용",
-    )
+class StageMetaUpdate(BaseModel):
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    time_limit: Optional[int] = Field(default=None, ge=0, le=3600)
+    p_max: Optional[int] = Field(default=None, ge=0, le=100)
+    base_score: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+
+
+class AnswerPathPayload(BaseModel):
+    """answer_path 1건의 페이로드. 어떤 필드가 의미를 가질지는 tier 에 따라 다름."""
+
+    id: Optional[str] = None
+    tier: str = Field(..., description="full | half | fail")
+    description: Optional[str] = ""
+    trigger_keywords: Optional[list[str]] = Field(default_factory=list)
+    rebuttal: Optional[str] = ""
+    acknowledgment_keywords: Optional[list[str]] = Field(default_factory=list)
+    follow_up: Optional[str] = ""
+    compensating_keywords: Optional[list[str]] = Field(default_factory=list)
+    exemplar_answer: Optional[str] = ""
+
+
+class QuestionPayload(BaseModel):
+    id: Optional[str] = None
+    isms_control_id: str = ""
+    isms_control_title: str = ""
+    scenario_context: str = ""
+    auditor_question: str = Field(..., min_length=1)
+    default_rebuttal: Optional[str] = ""
+    answer_paths: list[AnswerPathPayload] = Field(..., min_length=1)
 
 
 class LevelConfigsImport(BaseModel):
@@ -89,14 +109,21 @@ class ResetRequest(BaseModel):
     reset_password: bool = False
 
 
-class GenerateQuestionRequest(BaseModel):
-    level: int = Field(..., ge=1, le=3)
+class GenerateScenarioRequest(BaseModel):
+    isms_control_id: str = ""
+    isms_control_title: str = ""
     hint: str = ""
 
 
-class GenerateCriteriaRequest(BaseModel):
-    question: str = Field(..., min_length=1)
-    domain: str = ""
+class GenerateAuditorQuestionRequest(BaseModel):
+    scenario: str = Field(..., min_length=1)
+    isms_control_title: str = ""
+
+
+class GenerateAnswerPathsRequest(BaseModel):
+    scenario: str = Field(..., min_length=1)
+    auditor_question: str = Field(..., min_length=1)
+    isms_control_title: str = ""
 
 
 class PolishRequest(BaseModel):
@@ -135,7 +162,7 @@ async def change_password(
     if req.new_password == req.current_password:
         raise HTTPException(status_code=400, detail="새 비밀번호는 기존과 달라야 합니다.")
     config_service.set_admin_password_hash(auth_service.hash_password(req.new_password))
-    auth_service.revoke_token(token)  # 보안: 변경 후 기존 토큰 무효화
+    auth_service.revoke_token(token)
     return {"success": True, "message": "비밀번호가 변경되었습니다. 다시 로그인하세요."}
 
 
@@ -145,54 +172,115 @@ async def change_password(
 @router.get("/config", summary="전체 설정 조회")
 async def get_full_config(token: str = Depends(require_admin)) -> dict:
     cfg = config_service.get_config()
-    cfg.pop("admin_password_hash", None)  # 클라이언트에 해시 노출 금지
+    cfg.pop("admin_password_hash", None)
+    # level_configs 를 정규화된 형태로 반환 (구버전 데이터도 v2 형식으로 변환되어 나옴)
+    cfg["level_configs"] = {
+        str(stage): config_service.get_stage_config(stage)
+        for stage in config_service.ALLOWED_STAGES
+    }
     return cfg
 
 
-@router.put("/config/levels/{level}", summary="레벨 문제 수정")
-async def update_level(
-    level: int, req: LevelConfigUpdate, token: str = Depends(require_admin)
+# ──────────────────────────────────────────────
+# 스테이지 메타 수정
+# ──────────────────────────────────────────────
+@router.put("/config/stages/{stage}/meta", summary="스테이지 메타 수정")
+async def update_stage_meta(
+    stage: int, req: StageMetaUpdate, token: str = Depends(require_admin)
 ) -> dict:
-    if level not in (1, 2, 3):
-        raise HTTPException(status_code=400, detail="유효한 레벨이 아닙니다 (1~3).")
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
     updates = req.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="수정할 항목이 없습니다.")
-    if "pass_criteria" in updates and not updates["pass_criteria"]:
-        raise HTTPException(status_code=400, detail="pass_criteria 는 비어있을 수 없습니다.")
-    if "pass_logic" in updates:
-        if str(updates["pass_logic"]).upper() not in ("AND", "OR"):
-            raise HTTPException(
-                status_code=400, detail="pass_logic 은 'AND' 또는 'OR' 이어야 합니다."
-            )
-    config_service.update_level_config(level, updates)
-    return {"success": True, "level": level, "updated": list(updates.keys())}
+    try:
+        config_service.update_stage_meta(stage, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "stage": stage, "updated": list(updates.keys())}
 
 
-@router.post("/config/levels/import", summary="레벨 문제 전체 일괄 교체 (JSON import)")
+# ──────────────────────────────────────────────
+# 질문 풀 CRUD
+# ──────────────────────────────────────────────
+@router.get("/config/stages/{stage}/questions", summary="스테이지 질문 풀 조회")
+async def list_questions(
+    stage: int, token: str = Depends(require_admin)
+) -> dict:
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
+    return {"stage": stage, "questions": config_service.list_questions(stage)}
+
+
+@router.post("/config/stages/{stage}/questions", summary="질문 추가")
+async def add_question(
+    stage: int, req: QuestionPayload, token: str = Depends(require_admin)
+) -> dict:
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
+    try:
+        created = config_service.add_question(stage, req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "stage": stage, "question": created}
+
+
+@router.put(
+    "/config/stages/{stage}/questions/{question_id}",
+    summary="질문 수정 (전체 교체)",
+)
+async def update_question(
+    stage: int, question_id: str, req: QuestionPayload,
+    token: str = Depends(require_admin),
+) -> dict:
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
+    try:
+        updated = config_service.update_question(stage, question_id, req.model_dump())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "stage": stage, "question": updated}
+
+
+@router.delete(
+    "/config/stages/{stage}/questions/{question_id}",
+    summary="질문 삭제",
+)
+async def delete_question(
+    stage: int, question_id: str, token: str = Depends(require_admin)
+) -> dict:
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
+    try:
+        config_service.delete_question(stage, question_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"success": True, "stage": stage, "deleted_id": question_id}
+
+
+@router.post("/config/levels/import", summary="레벨 설정 전체 일괄 교체 (JSON import)")
 async def import_levels(
     req: LevelConfigsImport, token: str = Depends(require_admin)
 ) -> dict:
     parsed: dict[int, dict] = {}
     for k, v in req.level_configs.items():
         try:
-            level_int = int(k)
+            stage_int = int(k)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail=f"레벨 키 '{k}' 가 정수가 아닙니다.")
-        if level_int not in (1, 2, 3):
-            raise HTTPException(status_code=400, detail=f"레벨 키 '{k}' 가 유효하지 않습니다 (1~3).")
-        if not isinstance(v, dict):
-            raise HTTPException(status_code=400, detail=f"레벨 {k} 값이 객체가 아닙니다.")
-        if not v.get("question") or not v.get("domain"):
-            raise HTTPException(status_code=400, detail=f"레벨 {k}: domain·question 은 필수입니다.")
-        if not isinstance(v.get("pass_criteria"), list) or not v["pass_criteria"]:
+            raise HTTPException(status_code=400, detail=f"스테이지 키 '{k}' 가 정수가 아닙니다.")
+        if stage_int not in config_service.ALLOWED_STAGES:
             raise HTTPException(
-                status_code=400,
-                detail=f"레벨 {k}: pass_criteria 는 비어있지 않은 리스트여야 합니다.",
+                status_code=400, detail=f"스테이지 키 '{k}' 가 유효하지 않습니다 (1~3)."
             )
-        parsed[level_int] = v
-    if set(parsed.keys()) != {1, 2, 3}:
-        raise HTTPException(status_code=400, detail="레벨 1·2·3 모두 포함되어야 합니다.")
+        if not isinstance(v, dict):
+            raise HTTPException(status_code=400, detail=f"스테이지 {k} 값이 객체가 아닙니다.")
+        parsed[stage_int] = v
+    if set(parsed.keys()) != set(config_service.ALLOWED_STAGES):
+        raise HTTPException(status_code=400, detail="스테이지 1·2·3 모두 포함되어야 합니다.")
     config_service.replace_all_level_configs(parsed)
     return {"success": True, "imported_levels": sorted(parsed.keys())}
 
@@ -235,14 +323,31 @@ async def reset_defaults(
 
 
 # ──────────────────────────────────────────────
-# AI 어시스트
+# AI 어시스트 (시나리오 기반)
 # ──────────────────────────────────────────────
-@router.post("/ai/generate-question", summary="AI 로 새 심사 질문 생성")
+@router.post("/ai/generate-scenario", summary="AI 로 ISMS-P 시나리오 1문단 생성")
+async def ai_generate_scenario(
+    req: GenerateScenarioRequest, token: str = Depends(require_admin)
+) -> dict:
+    if not req.isms_control_id and not req.isms_control_title:
+        raise HTTPException(status_code=400, detail="ISMS-P 항목 ID 또는 이름이 필요합니다.")
+    try:
+        s = bedrock_service.generate_scenario(
+            req.isms_control_id, req.isms_control_title, req.hint
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"AI 서비스 오류: {exc}") from exc
+    if not s:
+        raise HTTPException(status_code=502, detail="AI가 시나리오를 생성하지 못했습니다.")
+    return {"scenario": s}
+
+
+@router.post("/ai/generate-question", summary="AI 로 심사원 질문 생성")
 async def ai_generate_question(
-    req: GenerateQuestionRequest, token: str = Depends(require_admin)
+    req: GenerateAuditorQuestionRequest, token: str = Depends(require_admin)
 ) -> dict:
     try:
-        q = bedrock_service.generate_question(req.level, req.hint)
+        q = bedrock_service.generate_auditor_question(req.scenario, req.isms_control_title)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=f"AI 서비스 오류: {exc}") from exc
     if not q:
@@ -250,17 +355,19 @@ async def ai_generate_question(
     return {"question": q}
 
 
-@router.post("/ai/generate-criteria", summary="AI 로 통과 기준 3가지 생성")
-async def ai_generate_criteria(
-    req: GenerateCriteriaRequest, token: str = Depends(require_admin)
+@router.post("/ai/generate-answer-paths", summary="AI 로 answer_paths 자동 생성")
+async def ai_generate_answer_paths(
+    req: GenerateAnswerPathsRequest, token: str = Depends(require_admin)
 ) -> dict:
     try:
-        criteria = bedrock_service.generate_pass_criteria(req.question, req.domain)
+        paths = bedrock_service.generate_answer_paths(
+            req.scenario, req.auditor_question, req.isms_control_title
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=f"AI 서비스 오류: {exc}") from exc
-    if not criteria:
-        raise HTTPException(status_code=502, detail="AI가 통과 기준을 생성하지 못했습니다.")
-    return {"criteria": criteria}
+    if not paths:
+        raise HTTPException(status_code=502, detail="AI가 answer_paths 를 생성하지 못했습니다.")
+    return {"answer_paths": paths}
 
 
 @router.post("/ai/polish", summary="AI 로 문장 다듬기")

@@ -21,7 +21,9 @@ export default function GameScreen({
   gameState,
   levelInfo,
   stageDomain,
-  passLogic,
+  stageTitle,
+  ismsControlId,
+  ismsControlTitle,
   onSendMessage,
 }) {
   const [inputText, setInputText] = useState('');
@@ -68,14 +70,18 @@ export default function GameScreen({
           />
           <div>
             <div className="game-screen__level-title">
-              {levelInfo?.emoji} {levelInfo?.title}
-              {passLogic && (
-                <span className={`game-screen__logic-badge game-screen__logic-badge--${passLogic.toLowerCase()}`}>
-                  {passLogic}
+              {levelInfo?.emoji} {stageTitle || levelInfo?.title}
+              {ismsControlId && (
+                <span
+                  className="game-screen__logic-badge game-screen__logic-badge--and"
+                  title={ismsControlTitle}
+                >
+                  {ismsControlId}
                 </span>
               )}
             </div>
             <div className="game-screen__level-subtitle">
+              {ismsControlTitle ? `${ismsControlTitle} · ` : ''}
               {stageDomain || levelInfo?.subtitle}
             </div>
           </div>

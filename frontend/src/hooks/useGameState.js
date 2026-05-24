@@ -1,37 +1,26 @@
 import { useState, useCallback } from 'react';
 
 /**
- * 게임 상태 관리 커스텀 훅 — 단계별 독립 세션 모델
+ * 게임 상태 관리 커스텀 훅 — 단계별 독립 세션 모델 (v2 — tier 기반)
  *
  * 흐름:
  *   idle
  *     → (Stage 1 세션 시작) playing
- *     → (pass) stageClear
+ *     → (full or half) stageClear     ← 두 tier 모두 단계 클리어
  *       → (다음 단계 세션 시작) playing  ... 반복 ...
- *     → (마지막 단계 pass) allClear
+ *     → (마지막 단계 통과) allClear
  *     → (timeout / prompt_limit) gameOver
  *
  * 각 단계는 별개의 session_id 를 가지며, 화면(messages)도 단계 진입 시 초기화됩니다.
- * 최종 점수는 단계별 점수의 합으로 계산됩니다.
+ * 최종 점수는 단계별 점수의 합으로 계산됩니다. half 통과는 절반 점수로 누적됩니다.
+ *
+ * 게임오버여도 클리어한 단계가 1개 이상이면 리더보드 등록이 가능합니다.
  */
 
-// 단계별 표시 메타데이터 (UI 라벨 전용 — 실제 도메인 텍스트는 백엔드에서 받음)
 const STAGES = {
-  1: {
-    title: 'STAGE 1',
-    headName: '첫 번째 머리',
-    emoji: '🔥',
-  },
-  2: {
-    title: 'STAGE 2',
-    headName: '두 번째 머리',
-    emoji: '💀',
-  },
-  3: {
-    title: 'STAGE 3',
-    headName: '세 번째 머리',
-    emoji: '⚡',
-  },
+  1: { title: 'STAGE 1', headName: '첫 번째 머리', emoji: '🔥' },
+  2: { title: 'STAGE 2', headName: '두 번째 머리', emoji: '💀' },
+  3: { title: 'STAGE 3', headName: '세 번째 머리', emoji: '⚡' },
 };
 
 export function useGameState() {
@@ -47,18 +36,23 @@ export function useGameState() {
   const [promptCount, setPromptCount] = useState(0);
   const [maxPrompts, setMaxPrompts] = useState(10);
   const [timeLimit, setTimeLimit] = useState(300);
-  const [stageDomain, setStageDomain] = useState('');
-  const [passLogic, setPassLogic] = useState('AND');
 
-  // 단계 누적 데이터 (리더보드 제출 / 결과 화면용)
-  // 각 원소: { level, session_id, score, time_used, prompt_count }
+  // 현재 단계 출제 정보
+  const [stageTitle, setStageTitle] = useState('');
+  const [stageSubtitle, setStageSubtitle] = useState('');
+  const [ismsControlId, setIsmsControlId] = useState('');
+  const [ismsControlTitle, setIsmsControlTitle] = useState('');
+  const [scenarioContext, setScenarioContext] = useState('');
+
+  // 단계 누적 데이터
+  // 각 원소: { level, session_id, score, tier, time_used, prompt_count, isms_control_id }
   const [clearedStages, setClearedStages] = useState([]);
 
   const [isLoading, setIsLoading] = useState(false);
 
   /**
    * 새 단계 세션이 시작되었을 때 호출.
-   * sessionData 는 /api/game/start 응답.
+   * sessionData 는 /api/game/start 응답 (v2 스키마).
    */
   const beginStage = useCallback((stageNum, sessionData) => {
     setStage(stageNum);
@@ -66,10 +60,14 @@ export function useGameState() {
     setPromptCount(0);
     setMaxPrompts(sessionData.p_max);
     setTimeLimit(sessionData.time_limit);
-    setStageDomain(sessionData.domain || '');
-    setPassLogic(sessionData.pass_logic || 'AND');
+    setStageTitle(sessionData.title || `STAGE ${stageNum}`);
+    setStageSubtitle(sessionData.subtitle || sessionData.domain || '');
+    setIsmsControlId(sessionData.isms_control_id || '');
+    setIsmsControlTitle(sessionData.isms_control_title || '');
+    setScenarioContext(sessionData.scenario_context || '');
     setGameState('playing');
-    setMessages([
+
+    const initialMessages = [
       {
         id: Date.now(),
         type: 'system',
@@ -82,13 +80,25 @@ export function useGameState() {
         text: sessionData.message,
         level: stageNum,
       },
-      {
+    ];
+    if (sessionData.scenario_context) {
+      initialMessages.push({
         id: Date.now() + 2,
-        type: 'auditor',
-        text: sessionData.question,
+        type: 'scenario',
+        text: sessionData.scenario_context,
         level: stageNum,
-      },
-    ]);
+        ismsControl: sessionData.isms_control_id
+          ? `${sessionData.isms_control_id} ${sessionData.isms_control_title || ''}`.trim()
+          : '',
+      });
+    }
+    initialMessages.push({
+      id: Date.now() + 3,
+      type: 'auditor',
+      text: sessionData.question,
+      level: stageNum,
+    });
+    setMessages(initialMessages);
   }, []);
 
   /**
@@ -100,7 +110,9 @@ export function useGameState() {
     setMessages([]);
     setPromptCount(0);
     setClearedStages([]);
-    // gameState 는 beginStage 호출 시 'playing' 으로 전환됨
+    setIsmsControlId('');
+    setIsmsControlTitle('');
+    setScenarioContext('');
   }, []);
 
   const addUserMessage = useCallback((text) => {
@@ -112,10 +124,19 @@ export function useGameState() {
 
   /**
    * AI 응답 처리.
-   * 백엔드 응답: { status, message, level, is_stage_clear, score, prompt_count, time_used }
+   * 백엔드 응답 (v2): { status, tier, matched_path_id, message, level,
+   *                    is_stage_clear, score, prompt_count, time_used }
    */
   const handleAIResponse = useCallback((response) => {
-    const { status, message, score, prompt_count, time_used } = response;
+    const {
+      status,
+      tier = 'fail',
+      message,
+      score,
+      prompt_count,
+      time_used,
+      is_stage_clear,
+    } = response;
 
     setMessages((prev) => [
       ...prev,
@@ -125,6 +146,7 @@ export function useGameState() {
         text: message,
         level: stage,
         status,
+        tier,
       },
     ]);
 
@@ -132,15 +154,18 @@ export function useGameState() {
       setPromptCount(prompt_count);
     }
 
-    if (status === 'pass') {
+    if (is_stage_clear || tier === 'full' || tier === 'half') {
       setClearedStages((prev) => [
         ...prev,
         {
           level: stage,
-          session_id: response.session_id || sessionId,
+          session_id: sessionId,
           score: score ?? 0,
+          tier,
           time_used: time_used ?? 0,
           prompt_count: prompt_count ?? 0,
+          isms_control_id: ismsControlId,
+          isms_control_title: ismsControlTitle,
         },
       ]);
       if (stage < 3) {
@@ -149,8 +174,7 @@ export function useGameState() {
         setGameState('allClear');
       }
     }
-    // fail 이면 그대로 playing 상태 유지
-  }, [stage, sessionId]);
+  }, [stage, sessionId, ismsControlId, ismsControlTitle]);
 
   /**
    * 게임 오버 (타임아웃 / 답변 횟수 초과)
@@ -181,8 +205,11 @@ export function useGameState() {
     setPromptCount(0);
     setMaxPrompts(10);
     setTimeLimit(300);
-    setStageDomain('');
-    setPassLogic('AND');
+    setStageTitle('');
+    setStageSubtitle('');
+    setIsmsControlId('');
+    setIsmsControlTitle('');
+    setScenarioContext('');
     setClearedStages([]);
     setIsLoading(false);
   }, []);
@@ -205,8 +232,14 @@ export function useGameState() {
     isLoading,
     maxPrompts,
     timeLimit,
-    stageDomain,
-    passLogic,
+
+    // 단계 출제 정보
+    stageTitle,
+    stageSubtitle,
+    stageDomain: stageSubtitle, // legacy alias
+    ismsControlId,
+    ismsControlTitle,
+    scenarioContext,
 
     // 누적값
     clearedStages,

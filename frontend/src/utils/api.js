@@ -33,18 +33,22 @@ async function apiRequest(endpoint, options = {}) {
 }
 
 /**
- * 게임 시작 - 새 세션 생성 (단계 단위 독립 세션)
+ * 게임 시작 - 새 세션 생성 (단계 단위 독립 세션, v2 응답)
  *
  * @param {number} level - 시작할 레벨 (1~3). 단계 전환마다 새로 호출하세요.
  * @returns {Promise<{
  *   session_id: string,
  *   level: number,
- *   domain: string,
+ *   title: string,
+ *   subtitle: string,
+ *   isms_control_id: string,
+ *   isms_control_title: string,
+ *   scenario_context: string,
  *   question: string,
  *   message: string,
  *   time_limit: number,
  *   p_max: number,
- *   pass_logic: string,
+ *   domain: string,
  * }>}
  */
 export async function startGame(level = 1) {
@@ -58,7 +62,17 @@ export async function startGame(level = 1) {
  * 채팅 메시지 전송 - AI 심사원에게 답변
  * @param {string} sessionId - 세션 ID
  * @param {string} message - 사용자 메시지
- * @returns {Promise<{status: string, message: string, level: number, is_game_clear: boolean, score?: number, prompt_count: number, time_used: number}>}
+ * @returns {Promise<{
+ *   status: 'pass'|'fail',
+ *   tier: 'full'|'half'|'fail',
+ *   matched_path_id: string,
+ *   message: string,
+ *   level: number,
+ *   is_stage_clear: boolean,
+ *   score: number|null,
+ *   prompt_count: number,
+ *   time_used: number
+ * }>}
  */
 export async function sendChat(sessionId, message) {
   return apiRequest('/api/game/chat', {
@@ -81,11 +95,13 @@ export async function getLeaderboard() {
 }
 
 /**
- * 리더보드 점수 등록 (모든 단계 합산)
+ * 리더보드 점수 등록 — 클리어한 단계들의 점수 합산 (v2)
  *
- * @param {string[]} sessionIds - 클리어한 모든 단계의 세션 ID 목록
+ * 게임오버여도 1점 이상 누적이면 등록 가능. 백엔드가 미클리어 세션은 무시합니다.
+ *
+ * @param {string[]} sessionIds - 클리어한 단계들의 세션 ID 목록 (1개 이상)
  * @param {string} name - 플레이어 이름
- * @returns {Promise<{success: boolean, message: string, score: number, time_used: number}>}
+ * @returns {Promise<{success: boolean, message: string, score: number, time_used: number, cleared_levels: number[]}>}
  */
 export async function submitScore(sessionIds, name) {
   return apiRequest('/api/leaderboard', {
@@ -94,6 +110,35 @@ export async function submitScore(sessionIds, name) {
       session_ids: sessionIds,
       name: name,
     }),
+  });
+}
+
+/**
+ * 모범답안 조회 — 세션 종료 후에만 호출 가능 (진행 중이면 403).
+ *
+ * @param {string} sessionId
+ * @returns {Promise<{
+ *   session_id: string,
+ *   level: number,
+ *   is_cleared: boolean,
+ *   final_tier: string|null,
+ *   final_score: number|null,
+ *   isms_control_id: string,
+ *   isms_control_title: string,
+ *   scenario_context: string,
+ *   auditor_question: string,
+ *   default_rebuttal: string,
+ *   answer_paths: Array<{
+ *     id: string, tier: string, description: string,
+ *     trigger_keywords: string[], rebuttal: string, follow_up: string,
+ *     acknowledgment_keywords: string[], compensating_keywords: string[],
+ *     exemplar_answer: string,
+ *   }>
+ * }>}
+ */
+export async function getSessionExemplars(sessionId) {
+  return apiRequest(`/api/game/session/${encodeURIComponent(sessionId)}/exemplars`, {
+    method: 'GET',
   });
 }
 

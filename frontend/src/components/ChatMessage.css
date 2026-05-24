@@ -108,6 +108,12 @@
   letter-spacing: 2px;
 }
 
+/* Half pass — 절반 점수 통과 (주황) */
+.chat-message__bubble--half {
+  border-color: var(--color-fire-orange, #ffae42) !important;
+  box-shadow: 0 0 12px rgba(255, 174, 66, 0.4);
+}
+
 /* Fail message - subtle */
 .chat-message__bubble--fail {
   border-color: rgba(255, 136, 0, 0.4) !important;

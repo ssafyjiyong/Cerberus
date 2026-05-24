@@ -2,11 +2,12 @@ import React from 'react';
 import './ChatMessage.css';
 
 /**
- * ChatMessage - 채팅 메시지 컴포넌트
- * 심사원(AI), 사용자, 시스템 메시지를 각각 다른 스타일로 표시합니다.
+ * ChatMessage — 채팅 메시지 컴포넌트
+ * 타입: system | scenario | auditor | user
+ * 평가 등급(tier): full | half | fail
  */
 export default function ChatMessage({ message }) {
-  const { type, text, status } = message;
+  const { type, text, status, tier, ismsControl } = message;
 
   if (type === 'system') {
     return (
@@ -16,10 +17,46 @@ export default function ChatMessage({ message }) {
     );
   }
 
+  if (type === 'scenario') {
+    return (
+      <div className="chat-message chat-message--system">
+        <div
+          className="chat-message__bubble"
+          style={{
+            borderColor: 'var(--color-fire-orange, #ffae42)',
+            background: 'rgba(60, 30, 0, 0.45)',
+            textAlign: 'left',
+          }}
+        >
+          {ismsControl && (
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: 1,
+                marginBottom: 6,
+                color: 'var(--color-fire-orange, #ffae42)',
+              }}
+            >
+              📑 근거 항목 — {ismsControl}
+            </div>
+          )}
+          <div style={{ fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+            🎬 {text}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const isAuditor = type === 'auditor';
   const typeClass = isAuditor ? 'chat-message--auditor' : 'chat-message--user';
-  const statusClass = status === 'pass' ? 'chat-message__bubble--pass' : 
-                      status === 'fail' ? 'chat-message__bubble--fail' : '';
+
+  // tier 기반 시각화 — full(녹색)/half(주황)/fail(빨강)
+  let statusClass = '';
+  if (tier === 'full') statusClass = 'chat-message__bubble--pass';
+  else if (tier === 'half') statusClass = 'chat-message__bubble--half';
+  else if (tier === 'fail' || status === 'fail') statusClass = 'chat-message__bubble--fail';
+  else if (status === 'pass') statusClass = 'chat-message__bubble--pass';
 
   return (
     <div className={`chat-message ${typeClass}`}>
@@ -27,6 +64,30 @@ export default function ChatMessage({ message }) {
         {isAuditor ? '🐕' : '🧑‍💻'}
       </div>
       <div className={`chat-message__bubble ${statusClass}`}>
+        {tier === 'half' && (
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: 1,
+              marginBottom: 4,
+              color: 'var(--color-fire-orange, #ffae42)',
+            }}
+          >
+            ◇ HALF PASS
+          </div>
+        )}
+        {tier === 'full' && (
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: 1,
+              marginBottom: 4,
+              color: 'var(--color-neon-green, #00ff88)',
+            }}
+          >
+            ★ FULL PASS
+          </div>
+        )}
         {text}
       </div>
     </div>

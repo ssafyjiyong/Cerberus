@@ -22,7 +22,6 @@ import boto3
 from botocore.exceptions import ClientError
 
 from config import AWS_REGION, DYNAMODB_TABLE_NAME
-from prompts.auditor_prompt import LEVEL_CONFIGS
 from services import config_service
 
 logger = logging.getLogger(__name__)
@@ -351,26 +350,22 @@ def get_analytics_summary() -> dict[str, Any]:
                 if idx > 0:
                     criteria_counter[idx] = criteria_counter.get(idx, 0) + 1
 
-        # 동적 설정의 현재 통과 기준을 사용 (관리자 수정이 반영되도록)
-        level_cfg = config_service.get_level_config(level) or LEVEL_CONFIGS.get(level, {})
-        pass_criteria = level_cfg.get("pass_criteria", [])
+        # v2: 풀 기반 모델로 전환되어 단계별 "통과 기준 번호" 개념은 없음.
+        # 레거시 로그(v1)에서 누적된 missing_criteria 가 있을 수도 있으므로 번호만 노출.
         weak_criteria = [
             {
                 "index": idx,
-                "criterion": (
-                    pass_criteria[idx - 1]
-                    if 1 <= idx <= len(pass_criteria)
-                    else f"기준 {idx}"
-                ),
+                "criterion": f"(v1 legacy) 기준 {idx}",
                 "fail_count": count,
             }
             for idx, count in sorted(
                 criteria_counter.items(), key=lambda x: x[1], reverse=True
             )
         ]
+        stage_cfg = config_service.get_stage_config(level)
 
         level_stats[level] = {
-            "domain": level_logs[0].get("domain", ""),
+            "domain": stage_cfg.get("subtitle") or level_logs[0].get("domain", ""),
             "reached_sessions": len(reached_sessions),
             "cleared_sessions": len(cleared_sessions),
             "clear_rate": (

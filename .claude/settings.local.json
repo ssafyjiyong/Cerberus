@@ -7,7 +7,9 @@
       "Bash(python -c \"import main; print\\('IMPORT_OK'\\)\")",
       "Bash(curl -s http://localhost:8000/api/health)",
       "Bash(python -c \"import json; json.load\\(open\\('aws/iam-policy.json', encoding='utf-8'\\)\\); print\\('JSON_VALID'\\)\")",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '.'\\); import prompts.auditor_prompt as p; import models; print\\('auditor_prompt OK'\\); print\\('STAGE_DEFAULTS keys:', list\\(p.STAGE_DEFAULTS.keys\\(\\)\\)\\)\")",
+      "Bash(python -c ' *)"
     ]
   }
 }
