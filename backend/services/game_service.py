@@ -28,6 +28,7 @@ from typing import Any, Optional
 from models import ChatResponse
 from prompts.auditor_prompt import normalize_tier
 from services import analytics_service, bedrock_service, config_service
+from time_utils import to_kst_iso
 
 logger = logging.getLogger(__name__)
 
@@ -330,9 +331,7 @@ def get_active_sessions() -> list[dict[str, Any]]:
                 "prompt_count": session.prompt_count,
                 "time_used": session.time_used,
                 "time_limit": session.time_limit,
-                "started_at": time.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(session.start_time)
-                ),
+                "started_at": to_kst_iso(session.start_time),
             }
         )
     active.sort(key=lambda s: s["started_at"], reverse=True)

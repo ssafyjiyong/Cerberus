@@ -66,6 +66,12 @@ export const adminApi = {
   deleteQuestion: (stage, questionId) =>
     call('DELETE', `/api/admin/config/stages/${stage}/questions/${encodeURIComponent(questionId)}`),
 
+  // 풀 재시드 (기본 시드 적용)
+  reseedStage: (stage, mode = 'replace') =>
+    call('POST', `/api/admin/config/stages/${stage}/reseed`, { mode }),
+  reseedAll: (mode = 'replace') =>
+    call('POST', '/api/admin/config/reseed-all', { mode }),
+
   // legacy 호환 (구버전 LevelEditor 사용 시)
   updateLevel: (stage, updates) =>
     call('PUT', `/api/admin/config/stages/${stage}/meta`, updates),

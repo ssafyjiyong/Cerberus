@@ -41,8 +41,10 @@ import random
 import secrets
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # noqa: F401
 from decimal import Decimal
+
+from time_utils import now_kst_iso
 from typing import Any, Optional
 
 import bcrypt
@@ -182,52 +184,41 @@ def _normalize_stage_payload(stage: int, raw: Any) -> dict[str, Any]:
     """
     저장소에서 읽은 스테이지 설정을 표준 형태로 변환.
 
-    v1(legacy) 형식 ({domain, question, pass_criteria, ...}) 이 들어오면 자동으로
-    v2 형식의 단일 질문 풀로 마이그레이션합니다.
+    v1(legacy) 형식 ({domain, question, pass_criteria, ...}) 이 들어오면 해당 데이터는
+    **버리고 기본 시드(seed_questions.py)로 교체**합니다. legacy 단일 질문을 보존하면
+    풀이 빈약해지고 새 시나리오 구조와 맞지 않기 때문입니다.
+
+    메타(title/subtitle/time_limit/p_max/base_score)는 가능한 범위에서 사용자의 값을
+    보존합니다.
     """
     defaults = get_default_stage_meta(stage)
 
     if not isinstance(raw, dict):
         return {**defaults, "questions": get_default_questions(stage)}
 
-    # v1 → v2 마이그레이션 감지
-    if "questions" not in raw and ("pass_criteria" in raw or "question" in raw):
-        legacy_question = {
-            "id": f"legacy-stage-{stage}",
-            "isms_control_id": "",
-            "isms_control_title": raw.get("domain", ""),
-            "scenario_context": (
-                f"(이전 버전에서 가져온 질문입니다. 관리자 페이지에서 시나리오를 보강해 주세요.) "
-                f"심사 영역: {raw.get('domain', '')}"
-            ),
-            "auditor_question": raw.get("question", ""),
-            "answer_paths": [
-                {
-                    "id": "legacy-full",
-                    "tier": "full",
-                    "description": "구버전 통과 기준(키워드 합집합)",
-                    "trigger_keywords": [
-                        str(c) for c in (raw.get("pass_criteria") or []) if str(c).strip()
-                    ],
-                    "follow_up": "",
-                    "compensating_keywords": [],
-                }
-            ],
-            "default_rebuttal": "근거가 부족합니다. 좀 더 구체적으로 답변해 주십시오.",
-        }
+    # v1 감지 — 풀 구조(`questions`)가 아직 없고 legacy 필드만 있으면 시드로 교체
+    is_legacy = "questions" not in raw and (
+        "pass_criteria" in raw or "question" in raw or "pass_logic" in raw or "domain" in raw
+    )
+    if is_legacy:
+        logger.info(
+            "Stage %d: v1(legacy) 데이터 감지 → 기본 시드 %d개로 교체합니다.",
+            stage, len(get_default_questions(stage)),
+        )
         return {
             "title": str(raw.get("title") or defaults["title"]),
             "subtitle": str(raw.get("subtitle") or defaults["subtitle"]),
             "time_limit": _safe_int(raw.get("time_limit"), defaults["time_limit"]),
             "p_max": _safe_int(raw.get("p_max"), defaults["p_max"]),
             "base_score": _safe_int(raw.get("base_score"), defaults["base_score"]),
-            "questions": [normalize_question(legacy_question)],
+            "questions": get_default_questions(stage),
         }
 
     # v2 정상 케이스
     raw_questions = raw.get("questions") or []
     questions = [_ensure_question_id(normalize_question(q)) for q in raw_questions if isinstance(q, dict)]
-    if not questions:
+    # 풀이 비었거나, legacy-* 잔재만 남았으면 시드로 보강
+    if not questions or all(q.get("id", "").startswith("legacy-") for q in questions):
         questions = get_default_questions(stage)
     return {
         "title": str(raw.get("title") or defaults["title"]),
@@ -267,7 +258,7 @@ def _default_config() -> dict[str, Any]:
         },
         "maintenance_mode": False,
         "schema_version": 2,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": now_kst_iso(),
     }
 
 
@@ -289,10 +280,72 @@ def _load_from_storage() -> dict[str, Any]:
             _config_table.put_item(Item=_to_dynamo(seed))
             logger.info("설정 테이블에 기본값 시드 완료")
             return seed
-        return _from_dynamo(item)
+        loaded = _from_dynamo(item)
+
+        # ── v1 → v2 자동 마이그레이션 ──
+        # schema_version 이 2 미만이거나, level_configs 가 legacy 형식이면
+        # 한 번에 v2 시드로 정규화하여 디스크에 다시 기록합니다. 이후 read 는 모두 v2.
+        migrated = _migrate_to_v2_if_needed(loaded)
+        if migrated is not None:
+            try:
+                _config_table.put_item(Item=_to_dynamo(migrated))
+                logger.info(
+                    "v1 → v2 자동 마이그레이션 완료. 모든 스테이지가 기본 시드(총 %d개)로 채워졌습니다.",
+                    sum(len(s.get("questions", [])) for s in migrated["level_configs"].values()),
+                )
+            except Exception as exc:
+                logger.error("v2 마이그레이션 결과 저장 실패: %s", exc)
+            return migrated
+        return loaded
     except Exception as exc:
         logger.error("설정 로드 실패, 기본값 사용: %s", exc)
         return _default_config()
+
+
+def _migrate_to_v2_if_needed(loaded: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """
+    저장소에서 읽은 raw 설정이 v1 이면 v2 로 변환해 반환.
+    v2 라면 None 을 반환합니다 (변경 불필요).
+    """
+    schema_version = int(loaded.get("schema_version") or 1)
+    levels = loaded.get("level_configs") or {}
+
+    def _stage_is_legacy(s: Any) -> bool:
+        if not isinstance(s, dict):
+            return True
+        if "questions" in s:
+            qs = s.get("questions") or []
+            # 풀에 legacy-* 만 있거나 비어있으면 마이그레이션 대상
+            return (not qs) or all(
+                isinstance(q, dict) and str(q.get("id", "")).startswith("legacy-")
+                for q in qs
+            )
+        # questions 키가 없고 v1 필드만 있으면 legacy
+        return any(k in s for k in ("pass_criteria", "pass_logic", "question", "domain"))
+
+    needs_migration = (
+        schema_version < 2
+        or any(
+            _stage_is_legacy(levels.get(str(stage)) or levels.get(stage))
+            for stage in ALLOWED_STAGES
+        )
+    )
+    if not needs_migration:
+        return None
+
+    # 메타는 보존, 질문 풀만 시드로 교체 (정확히 _normalize_stage_payload 가 처리)
+    new_levels: dict[str, dict[str, Any]] = {}
+    for stage in ALLOWED_STAGES:
+        raw = levels.get(str(stage)) or levels.get(stage)
+        new_levels[str(stage)] = _normalize_stage_payload(stage, raw)
+        for q in new_levels[str(stage)]["questions"]:
+            _ensure_question_id(q)
+
+    migrated = dict(loaded)
+    migrated["level_configs"] = new_levels
+    migrated["schema_version"] = 2
+    migrated["updated_at"] = now_kst_iso()
+    return migrated
 
 
 def _save_to_storage(updates: dict[str, Any]) -> None:
@@ -303,7 +356,7 @@ def _save_to_storage(updates: dict[str, Any]) -> None:
             current = _load_from_storage()
         for k, v in updates.items():
             current[k] = v
-        current["updated_at"] = datetime.now(timezone.utc).isoformat()
+        current["updated_at"] = now_kst_iso()
         _cache["config"] = current
 
     if not _is_available:
@@ -484,6 +537,51 @@ def update_question(stage: int, question_id: str, patch: dict[str, Any]) -> dict
     levels[str(stage)] = stage_cfg
     _save_to_storage({"level_configs": levels})
     return normalized
+
+
+def reseed_stage(stage: int, mode: str = "replace") -> dict[str, Any]:
+    """
+    스테이지의 질문 풀을 기본 시드로 재적용.
+
+    mode:
+        "replace" — 기존 풀을 모두 버리고 시드만 남김(기본).
+        "merge"   — 시드 중 ID가 중복되지 않는 것만 추가 (사용자 커스텀 보존).
+    """
+    if stage not in ALLOWED_STAGES:
+        raise ValueError(f"허용되지 않는 stage: {stage}")
+    cfg = get_config()
+    levels = {str(k): v for k, v in (cfg.get("level_configs") or {}).items()}
+    stage_cfg = _normalize_stage_payload(stage, levels.get(str(stage)))
+
+    seeds = get_default_questions(stage)
+    for q in seeds:
+        _ensure_question_id(q)
+
+    if mode == "merge":
+        existing_ids = {q.get("id") for q in stage_cfg["questions"]}
+        merged = list(stage_cfg["questions"])
+        added = 0
+        for seed in seeds:
+            if seed["id"] not in existing_ids:
+                merged.append(seed)
+                added += 1
+        stage_cfg["questions"] = merged
+        logger.info("Stage %d: 시드 merge — 추가 %d개", stage, added)
+    else:  # replace
+        stage_cfg["questions"] = seeds
+        logger.info("Stage %d: 시드 replace — %d개로 교체", stage, len(seeds))
+
+    levels[str(stage)] = stage_cfg
+    _save_to_storage({"level_configs": levels})
+    return stage_cfg
+
+
+def reseed_all_stages(mode: str = "replace") -> dict[int, dict[str, Any]]:
+    """모든 스테이지에 reseed_stage 적용."""
+    out: dict[int, dict[str, Any]] = {}
+    for stage in ALLOWED_STAGES:
+        out[stage] = reseed_stage(stage, mode=mode)
+    return out
 
 
 def delete_question(stage: int, question_id: str) -> None:

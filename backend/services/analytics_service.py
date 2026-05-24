@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # noqa: F401  (legacy compatibility)
 from decimal import Decimal
+
+from time_utils import now_kst_iso
 from typing import Any, Optional
 
 import boto3
@@ -151,7 +153,7 @@ def log_chat_interaction(
         "time_used": round(time_used, 2),
         "is_level_clear": is_level_clear,
         "is_game_clear": is_game_clear,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now_kst_iso(),
     }
 
     if not _is_available:
@@ -229,7 +231,7 @@ def log_game_session_summary(
         "is_game_clear": is_game_clear,
         "final_score": final_score,
         "end_reason": end_reason,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now_kst_iso(),
     }
 
     if not _is_available:

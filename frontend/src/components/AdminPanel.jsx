@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './AdminPanel.css';
 import { adminApi } from '../utils/adminApi';
+import { formatKst } from '../utils/scoring';
 
 // ============================================================
 // AdminPanel — 관리자 페이지 (6개 탭 통합)
@@ -26,7 +27,7 @@ export default function AdminPanel({ onClose }) {
   };
 
   const tabs = [
-    { id: 'questions', label: '질문 관리' },
+    { id: 'questions', label: '질문 풀 관리' },
     { id: 'params', label: '게임 설정' },
     { id: 'analytics', label: '분석·로그' },
     { id: 'sessions', label: '활성 세션' },
@@ -135,11 +136,85 @@ function QuestionsTab({ showToast }) {
     }
   };
 
+  const handleReseedAll = async (mode) => {
+    const confirmMsg =
+      mode === 'replace'
+        ? '⚠️ 모든 스테이지의 풀을 기본 시드로 완전히 교체합니다. 사용자 추가 질문은 모두 삭제됩니다. 계속할까요?'
+        : '시드 중 ID가 중복되지 않는 항목만 추가합니다 (사용자 질문 보존). 계속할까요?';
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      const r = await adminApi.reseedAll(mode);
+      showToast(r.message || '시드 재적용 완료');
+      await load();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   if (loading) return <div className="admin-empty">불러오는 중...</div>;
   if (!stages) return null;
 
+  // 풀 상태 통계 — 시드(25)에 비해 비정상으로 적으면 경고
+  const stageCounts = [1, 2, 3].map((s) => {
+    const sc = stages[String(s)] || stages[s] || {};
+    return { stage: s, count: (sc.questions || []).length };
+  });
+  const totalCount = stageCounts.reduce((sum, c) => sum + c.count, 0);
+  const looksUnseeded = totalCount < 5; // 시드 정상값(25) 대비 너무 적음
+
   return (
     <div>
+      {/* 시드 안내 — 풀이 비어있거나 너무 적을 때 강조 */}
+      {looksUnseeded && (
+        <div
+          className="admin-card"
+          style={{
+            borderColor: 'var(--color-fire-orange, #ffae42)',
+            background: 'rgba(60,30,0,0.35)',
+          }}
+        >
+          <h3 className="admin-card__title" style={{ color: 'var(--color-fire-orange)' }}>
+            ⚠️ 질문 풀이 비어있습니다
+          </h3>
+          <div className="admin-card__hint">
+            현재 전체 풀에 {totalCount}개의 질문만 등록되어 있습니다. 기본 시드는 ISMS-P 21개 중분류를
+            커버하는 25개 질문으로 구성되어 있습니다. 아래 버튼으로 한 번에 채워주세요.
+          </div>
+          <div className="admin-row-actions">
+            <button
+              className="admin-btn admin-btn--primary"
+              onClick={() => handleReseedAll('replace')}
+            >
+              🌱 기본 시드 25개 전체 적용 (replace)
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="admin-card">
+        <h3 className="admin-card__title">풀 관리 — 전체 동작</h3>
+        <div className="admin-card__hint">
+          현재 풀 상태: Stage 1 = {stageCounts[0].count}개 · Stage 2 = {stageCounts[1].count}개
+          · Stage 3 = {stageCounts[2].count}개 (총 {totalCount}개) · 기본 시드는 25개입니다.
+        </div>
+        <div className="admin-row-actions">
+          <button
+            className="admin-btn admin-btn--small"
+            onClick={() => handleReseedAll('merge')}
+            title="시드 중 ID 중복되지 않는 것만 추가 (사용자 질문 보존)"
+          >
+            ➕ 기본 시드 추가 (merge)
+          </button>
+          <button
+            className="admin-btn admin-btn--danger admin-btn--small"
+            onClick={() => handleReseedAll('replace')}
+            title="모든 풀을 시드로 완전히 교체 (사용자 질문 삭제)"
+          >
+            🔄 기본 시드로 전체 교체 (replace)
+          </button>
+        </div>
+      </div>
+
       <div className="admin-card">
         <h3 className="admin-card__title">JSON Import / Export</h3>
         <div className="admin-card__hint">
@@ -252,6 +327,21 @@ function StageQuestionPool({ stage, stageData, showToast, onChanged }) {
     }
   };
 
+  const handleReseed = async (mode) => {
+    const msg =
+      mode === 'replace'
+        ? `⚠️ Stage ${stage} 의 풀을 기본 시드로 완전히 교체합니다. 사용자 질문이 모두 삭제됩니다. 계속할까요?`
+        : `Stage ${stage} 풀에 시드 중 ID 중복되지 않는 것만 추가합니다. 계속할까요?`;
+    if (!window.confirm(msg)) return;
+    try {
+      const r = await adminApi.reseedStage(stage, mode);
+      showToast(`Stage ${stage} 시드 ${mode} 완료 (${r.question_count}개)`);
+      onChanged();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   return (
     <div className="admin-card">
       <h3 className="admin-card__title">
@@ -353,16 +443,34 @@ function StageQuestionPool({ stage, stageData, showToast, onChanged }) {
           <strong style={{ color: 'var(--color-fire-orange)' }}>
             질문 풀 ({questions.length}건) — 세션 시작 시 랜덤 1문제 출제
           </strong>
-          <button
-            className="admin-btn admin-btn--small"
-            onClick={() => {
-              setEditingId(null);
-              setCreating(true);
-            }}
-            disabled={busy || creating || editingId !== null}
-          >
-            + 질문 추가
-          </button>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <button
+              className="admin-btn admin-btn--small"
+              onClick={() => handleReseed('merge')}
+              disabled={busy || creating || editingId !== null}
+              title="시드 중 ID가 중복되지 않는 것만 추가 (사용자 질문 보존)"
+            >
+              ➕ 시드 추가
+            </button>
+            <button
+              className="admin-btn admin-btn--danger admin-btn--small"
+              onClick={() => handleReseed('replace')}
+              disabled={busy || creating || editingId !== null}
+              title="이 스테이지 풀을 시드로 완전히 교체"
+            >
+              🔄 시드 재적용
+            </button>
+            <button
+              className="admin-btn admin-btn--small"
+              onClick={() => {
+                setEditingId(null);
+                setCreating(true);
+              }}
+              disabled={busy || creating || editingId !== null}
+            >
+              + 질문 추가
+            </button>
+          </div>
         </div>
 
         {questions.length === 0 && !creating && (
@@ -1295,7 +1403,7 @@ function AnalyticsTab({ showToast }) {
                 {logs.map((log, i) => (
                   <tr key={`${log.session_id}-${log.log_id || i}`}>
                     <td className="col-mono">
-                      {(log.created_at || '').slice(0, 19).replace('T', ' ')}
+                      {formatKst(log.created_at)}
                     </td>
                     <td className="col-mono">
                       {(log.session_id || '').slice(0, 8)}
@@ -1409,7 +1517,7 @@ function SessionsTab({ showToast }) {
                 <td>{s.time_used}</td>
                 <td>{s.time_limit}</td>
                 <td className="col-mono">
-                  {(s.started_at || '').replace('T', ' ').replace('Z', '')}
+                  {formatKst(s.started_at)}
                 </td>
               </tr>
             ))}
@@ -1510,7 +1618,7 @@ function LeaderboardTab({ showToast }) {
                 <td>{e.score}</td>
                 <td>{e.time_used}초</td>
                 <td className="col-mono">
-                  {(e.created_at || '').slice(0, 19).replace('T', ' ')}
+                  {formatKst(e.created_at)}
                 </td>
                 <td className="col-mono">
                   {e.id ? e.id.slice(0, 8) : '(mock)'}

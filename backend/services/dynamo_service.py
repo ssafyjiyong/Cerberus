@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # noqa: F401
 from decimal import Decimal
 from typing import Optional
 
@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 
 from config import AWS_REGION, DYNAMODB_TABLE_NAME
 from models import LeaderboardEntry
+from time_utils import now_kst_iso
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ def submit_score(name: str, score: int, time_used: float) -> bool:
 
         # DynamoDB에 항목 추가
         item_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = now_kst_iso()
 
         _table.put_item(
             Item={

@@ -262,6 +262,58 @@ async def delete_question(
     return {"success": True, "stage": stage, "deleted_id": question_id}
 
 
+class ReseedRequest(BaseModel):
+    mode: str = Field(default="replace", description='"replace" 또는 "merge"')
+
+
+@router.post(
+    "/config/stages/{stage}/reseed",
+    summary="스테이지 풀을 기본 시드로 재적용",
+    description=(
+        "mode=replace(기본): 기존 풀을 시드로 완전히 교체. "
+        "mode=merge: 시드 중 ID가 중복되지 않은 항목만 추가(사용자 커스텀 보존)."
+    ),
+)
+async def reseed_stage(
+    stage: int, req: ReseedRequest, token: str = Depends(require_admin)
+) -> dict:
+    if stage not in config_service.ALLOWED_STAGES:
+        raise HTTPException(status_code=400, detail="유효한 스테이지가 아닙니다 (1~3).")
+    if req.mode not in ("replace", "merge"):
+        raise HTTPException(status_code=400, detail='mode 는 "replace" 또는 "merge" 여야 합니다.')
+    try:
+        stage_cfg = config_service.reseed_stage(stage, mode=req.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "success": True,
+        "stage": stage,
+        "mode": req.mode,
+        "question_count": len(stage_cfg.get("questions", [])),
+    }
+
+
+@router.post(
+    "/config/reseed-all",
+    summary="모든 스테이지 풀을 기본 시드로 재적용",
+)
+async def reseed_all(
+    req: ReseedRequest, token: str = Depends(require_admin)
+) -> dict:
+    if req.mode not in ("replace", "merge"):
+        raise HTTPException(status_code=400, detail='mode 는 "replace" 또는 "merge" 여야 합니다.')
+    out = config_service.reseed_all_stages(mode=req.mode)
+    counts = {stage: len(cfg.get("questions", [])) for stage, cfg in out.items()}
+    total = sum(counts.values())
+    return {
+        "success": True,
+        "mode": req.mode,
+        "per_stage_count": counts,
+        "total_count": total,
+        "message": f"전체 {total}개의 기본 시드 질문이 적용되었습니다.",
+    }
+
+
 @router.post("/config/levels/import", summary="레벨 설정 전체 일괄 교체 (JSON import)")
 async def import_levels(
     req: LevelConfigsImport, token: str = Depends(require_admin)
