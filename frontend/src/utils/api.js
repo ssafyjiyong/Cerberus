@@ -33,12 +33,24 @@ async function apiRequest(endpoint, options = {}) {
 }
 
 /**
- * 게임 시작 - 새 세션 생성
- * @returns {Promise<{session_id: string, level: number, question: string, message: string}>}
+ * 게임 시작 - 새 세션 생성 (단계 단위 독립 세션)
+ *
+ * @param {number} level - 시작할 레벨 (1~3). 단계 전환마다 새로 호출하세요.
+ * @returns {Promise<{
+ *   session_id: string,
+ *   level: number,
+ *   domain: string,
+ *   question: string,
+ *   message: string,
+ *   time_limit: number,
+ *   p_max: number,
+ *   pass_logic: string,
+ * }>}
  */
-export async function startGame() {
+export async function startGame(level = 1) {
   return apiRequest('/api/game/start', {
     method: 'POST',
+    body: JSON.stringify({ level }),
   });
 }
 
@@ -69,16 +81,17 @@ export async function getLeaderboard() {
 }
 
 /**
- * 리더보드 점수 등록
- * @param {string} sessionId - 세션 ID
+ * 리더보드 점수 등록 (모든 단계 합산)
+ *
+ * @param {string[]} sessionIds - 클리어한 모든 단계의 세션 ID 목록
  * @param {string} name - 플레이어 이름
- * @returns {Promise<{success: boolean, rank: number}>}
+ * @returns {Promise<{success: boolean, message: string, score: number, time_used: number}>}
  */
-export async function submitScore(sessionId, name) {
+export async function submitScore(sessionIds, name) {
   return apiRequest('/api/leaderboard', {
     method: 'POST',
     body: JSON.stringify({
-      session_id: sessionId,
+      session_ids: sessionIds,
       name: name,
     }),
   });

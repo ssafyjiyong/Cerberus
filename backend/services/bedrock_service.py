@@ -15,7 +15,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from config import AWS_REGION
-from prompts.auditor_prompt import render_system_prompt
+from prompts.auditor_prompt import normalize_pass_logic, render_system_prompt
 from services import config_service
 
 logger = logging.getLogger(__name__)
@@ -97,11 +97,15 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
     if level_config is None:
         raise ValueError(f"유효하지 않은 레벨입니다: {level}")
 
+    pass_logic = normalize_pass_logic(level_config.get("pass_logic"))
+    pass_criteria = list(level_config.get("pass_criteria", []))
+
     # 동적 설정으로부터 system prompt 를 매번 렌더링 (관리자 수정이 즉시 반영됨)
     system_prompt = render_system_prompt(
         domain=level_config.get("domain", ""),
         question=level_config.get("question", ""),
-        pass_criteria=level_config.get("pass_criteria", []),
+        pass_criteria=pass_criteria,
+        pass_logic=pass_logic,
     )
 
     # Converse API용 메시지 형식으로 변환
@@ -132,7 +136,24 @@ def evaluate_answer(level: int, conversation_history: list[dict]) -> dict:
         )
 
         # Tool Use 응답 파싱
-        return _parse_tool_use_response(response)
+        parsed = _parse_tool_use_response(response)
+
+        # ── 백엔드에서 pass_logic 강제 적용 (AI 의 status 는 참고만) ──
+        # AI 가 missing_criteria 만 정확히 채워주면 합/불 판정은 서버가 보장합니다.
+        total = len(pass_criteria)
+        missing = parsed.get("missing_criteria") or []
+        # 유효 범위 밖 번호는 무시
+        valid_missing = [m for m in missing if isinstance(m, int) and 1 <= m <= total]
+        parsed["missing_criteria"] = valid_missing
+
+        if total > 0:
+            if pass_logic == "OR":
+                # 하나 이상 충족 → pass
+                parsed["status"] = "pass" if len(valid_missing) < total else "fail"
+            else:  # AND
+                parsed["status"] = "pass" if not valid_missing else "fail"
+
+        return parsed
 
     except ClientError as exc:
         error_code = exc.response["Error"]["Code"]

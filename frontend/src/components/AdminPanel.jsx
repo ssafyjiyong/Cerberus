@@ -195,12 +195,18 @@ function LevelEditor({ level, initial, onSave, showToast }) {
   const [domain, setDomain] = useState('');
   const [question, setQuestion] = useState('');
   const [criteria, setCriteria] = useState([]);
+  const [passLogic, setPassLogic] = useState('AND');
+  const [timeLimit, setTimeLimit] = useState('');
+  const [pMax, setPMax] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setDomain(initial.domain || '');
     setQuestion(initial.question || '');
     setCriteria([...(initial.pass_criteria || [])]);
+    setPassLogic((initial.pass_logic || 'AND').toUpperCase());
+    setTimeLimit(initial.time_limit ? String(initial.time_limit) : '');
+    setPMax(initial.p_max ? String(initial.p_max) : '');
   }, [initial]);
 
   const setCriterion = (i, text) => {
@@ -222,12 +228,26 @@ function LevelEditor({ level, initial, onSave, showToast }) {
       showToast('모든 필드를 채우세요 (빈 기준 불가)', 'error');
       return;
     }
+    // 숫자 파싱 — 빈 값/0 은 전역 game_params 사용 의도로 0 저장
+    const tl = timeLimit === '' ? 0 : parseInt(timeLimit, 10);
+    const pm = pMax === '' ? 0 : parseInt(pMax, 10);
+    if (!Number.isFinite(tl) || tl < 0 || tl > 3600) {
+      showToast('time_limit 은 0~3600 사이여야 합니다.', 'error');
+      return;
+    }
+    if (!Number.isFinite(pm) || pm < 0 || pm > 100) {
+      showToast('p_max 는 0~100 사이여야 합니다.', 'error');
+      return;
+    }
     setBusy(true);
     try {
       await onSave({
         domain: domain.trim(),
         question: question.trim(),
         pass_criteria: criteria.map((c) => c.trim()),
+        pass_logic: passLogic,
+        time_limit: tl,
+        p_max: pm,
       });
     } finally {
       setBusy(false);
@@ -339,6 +359,67 @@ function LevelEditor({ level, initial, onSave, showToast }) {
           >
             ✨ AI 다듬기
           </button>
+        </div>
+      </div>
+
+      {/* ── 난이도 조정 (단계별 한도 + 통과 판정 방식) ── */}
+      <div
+        className="admin-card__row"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 'var(--space-md)',
+          marginTop: 'var(--space-md)',
+          paddingTop: 'var(--space-md)',
+          borderTop: '1px dashed var(--admin-border)',
+        }}
+      >
+        <div>
+          <label className="admin-card__label">통과 판정 방식 (Pass Logic)</label>
+          <select
+            className="admin-input"
+            value={passLogic}
+            onChange={(e) => setPassLogic(e.target.value)}
+            disabled={busy}
+          >
+            <option value="AND">AND — 모든 기준 충족 필요 (엄격)</option>
+            <option value="OR">OR — 한 개 이상 충족 시 통과 (관대)</option>
+          </select>
+          <span className="admin-card__hint">
+            난이도를 좌우합니다. Stage 3 는 AND 권장.
+          </span>
+        </div>
+        <div>
+          <label className="admin-card__label">제한 시간 (초)</label>
+          <input
+            type="number"
+            min="0"
+            max="3600"
+            className="admin-input"
+            value={timeLimit}
+            placeholder="0 = 전역값 사용"
+            onChange={(e) => setTimeLimit(e.target.value)}
+            disabled={busy}
+          />
+          <span className="admin-card__hint">
+            0/빈칸이면 게임 설정 탭의 TIME_LIMIT 사용
+          </span>
+        </div>
+        <div>
+          <label className="admin-card__label">최대 답변 횟수 (P_MAX)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            className="admin-input"
+            value={pMax}
+            placeholder="0 = 전역값 사용"
+            onChange={(e) => setPMax(e.target.value)}
+            disabled={busy}
+          />
+          <span className="admin-card__hint">
+            낮을수록 어려움 (Stage 3 = 6 권장)
+          </span>
         </div>
       </div>
 

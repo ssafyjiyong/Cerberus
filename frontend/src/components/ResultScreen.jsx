@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
 import './ResultScreen.css';
-import { getTimeScore, getPromptScore, getGrade, formatTime } from '../utils/scoring';
+import { getGrade, formatTime } from '../utils/scoring';
 
 /**
- * ResultScreen - 게임 클리어 결과 화면
- * 최종 점수, 등급, 브레이크다운을 보여주고 랭킹 등록을 제공합니다.
+ * ResultScreen - 모든 단계 클리어 결과 화면
+ *
+ * 단계 단위 독립 세션이므로:
+ * - score / timeUsed / promptCount 는 모든 단계의 합산값
+ * - clearedStages 는 각 단계별 상세 내역 ({ level, score, time_used, prompt_count })
  */
 export default function ResultScreen({
   score,
   timeUsed,
   promptCount,
+  clearedStages = [],
   onSubmitScore,
   onPlayAgain,
   onShowLeaderboard,
@@ -19,8 +23,6 @@ export default function ResultScreen({
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const grade = getGrade(score);
-  const timeScore = getTimeScore(timeUsed);
-  const promptScore = getPromptScore(promptCount);
 
   const handleSubmit = async () => {
     if (!playerName.trim() || isSubmitted) return;
@@ -52,23 +54,25 @@ export default function ResultScreen({
           </div>
         </div>
 
-        {/* 점수 브레이크다운 */}
+        {/* 단계별 브레이크다운 */}
         <div className="result-screen__breakdown">
+          {clearedStages.length > 0 && clearedStages.map((s) => (
+            <div key={s.level} className="result-screen__breakdown-row">
+              <span className="result-screen__breakdown-label">
+                🎯 STAGE {s.level}
+              </span>
+              <span className="result-screen__breakdown-value">
+                +{s.score}점 · {formatTime(Math.round(s.time_used))} · {s.prompt_count}회
+              </span>
+            </div>
+          ))}
           <div className="result-screen__breakdown-row">
-            <span className="result-screen__breakdown-label">⏱ 클리어 시간</span>
-            <span className="result-screen__breakdown-value">{formatTime(timeUsed)}</span>
+            <span className="result-screen__breakdown-label">⏱ 총 소요 시간</span>
+            <span className="result-screen__breakdown-value">{formatTime(Math.round(timeUsed))}</span>
           </div>
           <div className="result-screen__breakdown-row">
-            <span className="result-screen__breakdown-label">⏱ 시간 점수</span>
-            <span className="result-screen__breakdown-value">+{timeScore}</span>
-          </div>
-          <div className="result-screen__breakdown-row">
-            <span className="result-screen__breakdown-label">💬 답변 횟수</span>
+            <span className="result-screen__breakdown-label">💬 총 답변 횟수</span>
             <span className="result-screen__breakdown-value">{promptCount}회</span>
-          </div>
-          <div className="result-screen__breakdown-row">
-            <span className="result-screen__breakdown-label">💬 효율 점수</span>
-            <span className="result-screen__breakdown-value">+{promptScore}</span>
           </div>
         </div>
 

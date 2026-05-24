@@ -32,13 +32,26 @@ from config import (
     W_PROMPT as DEFAULT_W_PROMPT,
     W_TIME as DEFAULT_W_TIME,
 )
-from prompts.auditor_prompt import LEVEL_CONFIGS as DEFAULT_LEVEL_CONFIGS
+from prompts.auditor_prompt import (
+    LEVEL_CONFIGS as DEFAULT_LEVEL_CONFIGS,
+    normalize_pass_logic,
+)
 
 logger = logging.getLogger(__name__)
 
 CONFIG_TABLE_NAME = f"{DYNAMODB_TABLE_NAME}-config"
 CONFIG_ITEM_ID = "MAIN"
 DEFAULT_ADMIN_PASSWORD = "mzcadmin"  # 최초 비밀번호 (배포 직후 변경 권장)
+
+# 레벨 설정에서 허용되는 필드
+ALLOWED_LEVEL_FIELDS = (
+    "domain",
+    "question",
+    "pass_criteria",
+    "pass_logic",   # "AND" | "OR"
+    "time_limit",   # 단계별 제한 시간(초). 없거나 0이면 전역 game_params 사용
+    "p_max",        # 단계별 최대 답변 횟수. 없거나 0이면 전역 game_params 사용
+)
 
 # ──────────────────────────────────────────────
 # DynamoDB 리소스
@@ -131,14 +144,32 @@ def _default_password_hash() -> str:
     ).decode("utf-8")
 
 
+def _normalize_level_payload(cfg: dict[str, Any]) -> dict[str, Any]:
+    """레벨 설정 한 건을 표준화. 누락된 선택 필드는 기본값으로 채움."""
+    pass_logic = normalize_pass_logic(cfg.get("pass_logic"))
+    # time_limit / p_max: 0 또는 음수면 전역 사용 의도로 보고 0 으로 저장
+    try:
+        time_limit = int(cfg.get("time_limit") or 0)
+    except (TypeError, ValueError):
+        time_limit = 0
+    try:
+        p_max = int(cfg.get("p_max") or 0)
+    except (TypeError, ValueError):
+        p_max = 0
+    return {
+        "domain": str(cfg.get("domain", "")),
+        "question": str(cfg.get("question", "")),
+        "pass_criteria": [str(c) for c in cfg.get("pass_criteria", []) if str(c).strip()],
+        "pass_logic": pass_logic,
+        "time_limit": max(0, time_limit),
+        "p_max": max(0, p_max),
+    }
+
+
 def _default_config() -> dict[str, Any]:
     """코드 기본값으로 채워진 설정 객체."""
     editable_levels = {
-        str(level): {
-            "domain": cfg["domain"],
-            "question": cfg["question"],
-            "pass_criteria": list(cfg["pass_criteria"]),
-        }
+        str(level): _normalize_level_payload(cfg)
         for level, cfg in DEFAULT_LEVEL_CONFIGS.items()
     }
 
@@ -221,13 +252,38 @@ def invalidate_cache() -> None:
 
 
 def get_level_config(level: int) -> Optional[dict]:
+    """레벨 설정을 조회. 항상 표준화된 키 집합을 반환합니다."""
     levels = get_config().get("level_configs") or {}
-    return levels.get(str(level)) or levels.get(level)
+    raw = levels.get(str(level)) or levels.get(level)
+    if raw is None:
+        return None
+    return _normalize_level_payload(raw)
 
 
 def get_all_level_configs() -> dict[int, dict]:
     levels = get_config().get("level_configs") or {}
-    return {int(k): v for k, v in levels.items()}
+    return {int(k): _normalize_level_payload(v) for k, v in levels.items()}
+
+
+def get_effective_level_runtime(level: int) -> dict[str, Any]:
+    """
+    런타임에 실제 적용될 단계 파라미터 (time_limit, p_max, pass_logic) 를 반환.
+
+    단계별 값이 0/누락이면 전역 game_params 의 값을 폴백으로 사용합니다.
+    게임 세션 생성 시 사용됩니다.
+    """
+    lvl = get_level_config(level) or {}
+    params = get_game_params()
+    time_limit = lvl.get("time_limit") or int(params.get("TIME_LIMIT", 300))
+    p_max = lvl.get("p_max") or int(params.get("P_MAX", 15))
+    return {
+        "time_limit": int(time_limit),
+        "p_max": int(p_max),
+        "pass_logic": normalize_pass_logic(lvl.get("pass_logic")),
+        "domain": lvl.get("domain", ""),
+        "question": lvl.get("question", ""),
+        "pass_criteria": list(lvl.get("pass_criteria", [])),
+    }
 
 
 def get_game_params() -> dict[str, Any]:
@@ -253,21 +309,30 @@ def update_level_config(level: int, level_config: dict) -> None:
     levels = {str(k): v for k, v in levels.items()}
 
     existing = levels.get(str(level), {})
-    existing.update(
-        {k: v for k, v in level_config.items() if k in ("domain", "question", "pass_criteria")}
-    )
-    levels[str(level)] = existing
+    # 들어온 필드만 부분 업데이트
+    patch = {k: v for k, v in level_config.items() if k in ALLOWED_LEVEL_FIELDS}
+    if "pass_logic" in patch:
+        patch["pass_logic"] = normalize_pass_logic(patch["pass_logic"])
+    if "time_limit" in patch:
+        try:
+            patch["time_limit"] = max(0, int(patch["time_limit"] or 0))
+        except (TypeError, ValueError):
+            patch.pop("time_limit", None)
+    if "p_max" in patch:
+        try:
+            patch["p_max"] = max(0, int(patch["p_max"] or 0))
+        except (TypeError, ValueError):
+            patch.pop("p_max", None)
+    existing.update(patch)
+    # 최종 표준화 (저장 시 누락 필드 디폴트 채우기)
+    levels[str(level)] = _normalize_level_payload(existing)
     _save_to_storage({"level_configs": levels})
 
 
 def replace_all_level_configs(new_configs: dict[int, dict]) -> None:
     """모든 레벨 설정을 일괄 교체 (import 기능용)."""
     normalized = {
-        str(level): {
-            "domain": cfg.get("domain", ""),
-            "question": cfg.get("question", ""),
-            "pass_criteria": list(cfg.get("pass_criteria", [])),
-        }
+        str(level): _normalize_level_payload(cfg)
         for level, cfg in new_configs.items()
     }
     _save_to_storage({"level_configs": normalized})

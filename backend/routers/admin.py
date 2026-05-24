@@ -56,6 +56,17 @@ class LevelConfigUpdate(BaseModel):
     domain: Optional[str] = None
     question: Optional[str] = None
     pass_criteria: Optional[list[str]] = None
+    pass_logic: Optional[str] = Field(
+        default=None, description="통과 판정 방식: AND 또는 OR"
+    )
+    time_limit: Optional[int] = Field(
+        default=None, ge=0, le=3600,
+        description="단계별 제한 시간(초). 0 이면 전역 game_params 값을 사용",
+    )
+    p_max: Optional[int] = Field(
+        default=None, ge=0, le=100,
+        description="단계별 최대 답변 횟수. 0 이면 전역 game_params 값을 사용",
+    )
 
 
 class LevelConfigsImport(BaseModel):
@@ -149,6 +160,11 @@ async def update_level(
         raise HTTPException(status_code=400, detail="수정할 항목이 없습니다.")
     if "pass_criteria" in updates and not updates["pass_criteria"]:
         raise HTTPException(status_code=400, detail="pass_criteria 는 비어있을 수 없습니다.")
+    if "pass_logic" in updates:
+        if str(updates["pass_logic"]).upper() not in ("AND", "OR"):
+            raise HTTPException(
+                status_code=400, detail="pass_logic 은 'AND' 또는 'OR' 이어야 합니다."
+            )
     config_service.update_level_config(level, updates)
     return {"success": True, "level": level, "updated": list(updates.keys())}
 

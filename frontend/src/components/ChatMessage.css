@@ -29,13 +29,13 @@
 /* Avatar */
 .chat-message__avatar {
   flex-shrink: 0;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 24px;
   border: 2px solid var(--border-purple);
 }
 
@@ -53,12 +53,15 @@
 
 /* Message bubble */
 .chat-message__bubble {
-  padding: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
   border-radius: var(--radius-md);
-  line-height: 1.7;
-  font-size: 14px;
+  line-height: 1.75;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   position: relative;
   word-break: keep-all;
+  white-space: pre-wrap;
 }
 
 .chat-message--auditor .chat-message__bubble {
@@ -81,10 +84,11 @@
   border: 1px solid var(--border-purple);
   color: var(--text-secondary);
   font-family: var(--font-pixel);
-  font-size: 10px;
+  font-size: 12px;
   text-align: center;
   letter-spacing: 1px;
-  padding: var(--space-sm) var(--space-lg);
+  padding: var(--space-md) var(--space-lg);
+  line-height: 1.6;
 }
 
 /* Pass message */
@@ -97,7 +101,7 @@
   content: '✅ PASS';
   display: block;
   font-family: var(--font-pixel);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-neon-green);
   text-shadow: var(--glow-green);
   margin-bottom: var(--space-sm);

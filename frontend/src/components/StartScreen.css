@@ -83,20 +83,21 @@
 /* Title */
 .start-screen__title {
   font-family: var(--font-pixel);
-  font-size: clamp(10px, 2vw, 16px);
+  font-size: clamp(14px, 2.4vw, 20px);
   color: var(--color-fire-orange);
   text-shadow: var(--glow-orange);
   text-align: center;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
 }
 
 .start-screen__subtitle {
   font-family: var(--font-pixel);
-  font-size: clamp(8px, 1.2vw, 11px);
+  font-size: clamp(11px, 1.4vw, 14px);
   color: var(--text-secondary);
   text-align: center;
-  margin-top: var(--space-sm);
+  margin-top: var(--space-md);
   line-height: 1.8;
+  letter-spacing: 1.5px;
 }
 
 /* Insert Coin text */
@@ -172,34 +173,37 @@
 /* How to play section */
 .start-screen__info {
   font-family: var(--font-pixel);
-  font-size: clamp(7px, 1vw, 9px);
-  color: var(--text-dim);
+  font-size: clamp(10px, 1.2vw, 12px);
+  color: var(--text-secondary);
   text-align: center;
-  line-height: 2;
+  line-height: 2.2;
   max-width: 600px;
   border: 1px solid var(--border-purple);
-  padding: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
   background: rgba(10, 10, 26, 0.8);
+  letter-spacing: 1px;
 }
 
 .start-screen__info-title {
   color: var(--color-neon-blue);
   text-shadow: var(--glow-blue);
-  font-size: clamp(8px, 1.2vw, 10px);
-  margin-bottom: var(--space-sm);
+  font-size: clamp(11px, 1.4vw, 13px);
+  margin-bottom: var(--space-md);
+  letter-spacing: 2px;
 }
 
 /* Leaderboard preview */
 .start-screen__leaderboard-btn {
   font-family: var(--font-pixel);
-  font-size: clamp(8px, 1vw, 10px);
+  font-size: clamp(10px, 1.2vw, 12px);
   color: var(--color-fire-yellow);
   background: none;
   border: 1px solid var(--color-fire-yellow);
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-md) var(--space-lg);
   cursor: pointer;
   transition: all 0.3s ease;
   text-shadow: 0 0 5px rgba(255, 204, 0, 0.5);
+  letter-spacing: 2px;
 }
 
 .start-screen__leaderboard-btn:hover {

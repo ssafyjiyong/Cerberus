@@ -3,29 +3,34 @@ import { GAME_CONFIG } from '../utils/scoring';
 
 /**
  * 타이머 커스텀 훅
- * 300초(5분) 카운트다운을 관리합니다.
+ * 단계마다 다른 제한 시간을 사용할 수 있도록 `reset(newLimit)` 에서 한도를 갱신합니다.
  */
 export function useTimer() {
+  const [timeLimit, setTimeLimit] = useState(GAME_CONFIG.TIME_LIMIT);
   const [timeRemaining, setTimeRemaining] = useState(GAME_CONFIG.TIME_LIMIT);
   const [isRunning, setIsRunning] = useState(false);
-  const [startTimestamp, setStartTimestamp] = useState(null);
   const intervalRef = useRef(null);
 
-  const timeUsed = GAME_CONFIG.TIME_LIMIT - timeRemaining;
+  const timeUsed = timeLimit - timeRemaining;
 
   const start = useCallback(() => {
     setIsRunning(true);
-    setStartTimestamp(Date.now());
   }, []);
 
   const pause = useCallback(() => {
     setIsRunning(false);
   }, []);
 
-  const reset = useCallback(() => {
+  /**
+   * 타이머 초기화. newLimit 을 넘기면 그 시간으로 재설정합니다.
+   */
+  const reset = useCallback((newLimit) => {
     setIsRunning(false);
-    setTimeRemaining(GAME_CONFIG.TIME_LIMIT);
-    setStartTimestamp(null);
+    const limit = Number.isFinite(newLimit) && newLimit > 0
+      ? newLimit
+      : GAME_CONFIG.TIME_LIMIT;
+    setTimeLimit(limit);
+    setTimeRemaining(limit);
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -55,10 +60,12 @@ export function useTimer() {
   }, [isRunning]);
 
   const isTimedOut = timeRemaining <= 0;
-  const isWarning = timeRemaining <= 60 && timeRemaining > 0;
-  const isDanger = timeRemaining <= 30 && timeRemaining > 0;
+  // 경고/위험 임계값: 전체 한도의 비율 기반
+  const isWarning = timeRemaining <= Math.max(60, Math.round(timeLimit * 0.25)) && timeRemaining > 0;
+  const isDanger = timeRemaining <= Math.max(30, Math.round(timeLimit * 0.1)) && timeRemaining > 0;
 
   return {
+    timeLimit,
     timeRemaining,
     timeUsed,
     isRunning,

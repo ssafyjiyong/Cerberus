@@ -4,7 +4,8 @@
 
 /* Google Fonts - Press Start 2P (픽셀 폰트) */
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+/* 더 무거운 weight 들도 미리 로드해서 한글 가독성 강화 */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&display=swap');
 
 /* ====== CSS Variables (Design Tokens) ====== */
 :root {
@@ -77,10 +78,36 @@ html, body, #root {
 
 body {
   font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.6;
   background: var(--bg-deep-dark);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 한글 가독성: 기본 폰트 두께 강화 */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  font-weight: 500;
+}
+
+label,
+p,
+span,
+div {
+  font-weight: inherit;
+}
+
+strong,
+b,
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
 }
 
 /* ====== CRT Scanline Overlay ====== */
@@ -337,7 +364,8 @@ body {
 /* ====== Input Styles ====== */
 .arcade-input {
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 16px;
+  font-weight: 500;
   padding: var(--space-md);
   background: var(--bg-deep-dark);
   border: 2px solid var(--border-purple);

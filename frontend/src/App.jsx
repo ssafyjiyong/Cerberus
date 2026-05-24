@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import './App.css';
 import { useGameState } from './hooks/useGameState';
 import { useTimer } from './hooks/useTimer';
@@ -15,7 +15,11 @@ import { hasToken } from './utils/adminAuth';
 
 /**
  * App - 케르베로스: 어둠의 심사원 메인 앱
- * 게임의 전체 흐름을 관리하는 최상위 컴포넌트입니다.
+ *
+ * 단계별 독립 세션 모델:
+ * - 각 단계마다 새 세션을 백엔드에서 받아 시작
+ * - 단계 통과 시 화면(messages)과 타이머가 초기화되고 다음 단계로 진입
+ * - 모든 단계 통과 시 누적 점수로 리더보드 등록
  */
 export default function App() {
   const game = useGameState();
@@ -25,6 +29,9 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   // 관리자 모드: null | 'login' | 'panel'
   const [adminMode, setAdminMode] = useState(null);
+
+  // stageClear → 다음 단계 전환 중복 방지용 가드
+  const advancingRef = useRef(false);
 
   // 관리자 진입 요청: 기존 토큰이 있으면 바로 패널, 없으면 로그인 모달
   const handleRequestAdmin = useCallback(() => {
@@ -39,7 +46,7 @@ export default function App() {
     setAdminMode(null);
   }, []);
 
-  // 타임아웃 감지
+  // 타임아웃 감지 (현재 단계 한정)
   useEffect(() => {
     if (timer.isTimedOut && game.gameState === 'playing') {
       game.setGameOver('timeout');
@@ -49,21 +56,22 @@ export default function App() {
   // 에러 자동 해제
   useEffect(() => {
     if (error) {
-      const timeout = setTimeout(() => setError(null), 5000);
-      return () => clearTimeout(timeout);
+      const t = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(t);
     }
   }, [error]);
 
   /**
-   * 게임 시작 핸들러
+   * 게임 시작 핸들러 — Stage 1 세션 생성
    */
   const handleStartGame = useCallback(async () => {
+    game.startNewGame();
     game.setIsLoading(true);
     setError(null);
     try {
-      const response = await apiStartGame();
-      game.startGame(response.session_id, response.question);
-      timer.reset();
+      const response = await apiStartGame(1);
+      game.beginStage(1, response);
+      timer.reset(response.time_limit);
       timer.start();
     } catch (err) {
       setError(err.message);
@@ -86,7 +94,7 @@ export default function App() {
       const response = await sendChat(game.sessionId, text);
       game.handleAIResponse(response);
 
-      // 프롬프트 수 초과 체크
+      // 프롬프트 한도 초과 (현재 단계 한정)
       if (response.prompt_count >= game.maxPrompts && response.status !== 'pass') {
         game.setGameOver('prompt_limit');
       }
@@ -98,19 +106,49 @@ export default function App() {
   }, [game]);
 
   /**
-   * 점수 제출 핸들러
+   * stageClear → 다음 단계 세션 시작 (2.5초 후 자동 진행)
+   */
+  useEffect(() => {
+    if (game.gameState !== 'stageClear') return;
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+
+    const nextLevel = game.stage + 1;
+    timer.pause();
+
+    const t = setTimeout(async () => {
+      try {
+        const response = await apiStartGame(nextLevel);
+        game.beginStage(nextLevel, response);
+        timer.reset(response.time_limit);
+        timer.start();
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        advancingRef.current = false;
+      }
+    }, 2500);
+
+    return () => {
+      clearTimeout(t);
+      advancingRef.current = false;
+    };
+  }, [game.gameState, game.stage, game.beginStage, timer]);
+
+  /**
+   * 점수 제출 — 클리어한 모든 단계의 세션 ID 를 합산 제출
    */
   const handleSubmitScore = useCallback(async (name) => {
-    if (!game.sessionId) return;
+    if (!game.sessionIds || game.sessionIds.length === 0) return;
     setIsSubmitting(true);
     try {
-      await submitScore(game.sessionId, name);
+      await submitScore(game.sessionIds, name);
     } catch (err) {
       setError(err.message);
     } finally {
       setIsSubmitting(false);
     }
-  }, [game.sessionId]);
+  }, [game.sessionIds]);
 
   /**
    * 재시작 핸들러
@@ -122,7 +160,7 @@ export default function App() {
   }, [game, timer]);
 
   /**
-   * 리더보드 표시 핸들러
+   * 리더보드 표시
    */
   const handleShowLeaderboard = useCallback(() => {
     setShowLeaderboard(true);
@@ -132,9 +170,7 @@ export default function App() {
     setShowLeaderboard(false);
   }, []);
 
-  // 현재 표시할 화면 결정
   const renderScreen = () => {
-    // 리더보드 오버레이
     if (showLeaderboard) {
       return <Leaderboard onBack={handleBackFromLeaderboard} />;
     }
@@ -152,11 +188,11 @@ export default function App() {
         );
 
       case 'playing':
-      case 'levelClear':
+      case 'stageClear':
         return (
           <GameScreen
             messages={game.messages}
-            currentLevel={game.currentLevel}
+            currentLevel={game.stage}
             clearedLevels={game.clearedLevels}
             promptCount={game.promptCount}
             maxPrompts={game.maxPrompts}
@@ -165,7 +201,9 @@ export default function App() {
             isDanger={timer.isDanger}
             isLoading={game.isLoading}
             gameState={game.gameState}
-            levelInfo={game.levelInfo}
+            levelInfo={game.stageInfo}
+            stageDomain={game.stageDomain}
+            passLogic={game.passLogic}
             onSendMessage={handleSendMessage}
           />
         );
@@ -173,9 +211,10 @@ export default function App() {
       case 'allClear':
         return (
           <ResultScreen
-            score={game.finalScore}
-            timeUsed={game.finalTimeUsed}
-            promptCount={game.promptCount}
+            score={game.totalScore}
+            timeUsed={game.totalTimeUsed}
+            promptCount={game.totalPromptCount}
+            clearedStages={game.clearedStages}
             onSubmitScore={handleSubmitScore}
             onPlayAgain={handlePlayAgain}
             onShowLeaderboard={handleShowLeaderboard}
@@ -186,7 +225,7 @@ export default function App() {
       case 'gameOver':
         return (
           <GameOverScreen
-            currentLevel={game.currentLevel}
+            currentLevel={game.stage}
             promptCount={game.promptCount}
             clearedLevels={game.clearedLevels}
             onPlayAgain={handlePlayAgain}
@@ -200,17 +239,14 @@ export default function App() {
 
   return (
     <div className="app" id="app-root">
-      {/* CRT 스캔라인 오버레이 */}
       <div className="crt-overlay" />
 
-      {/* 아케이드 프레임 */}
       <div className="arcade-frame">
         <div className="app__screen">
           {renderScreen()}
         </div>
       </div>
 
-      {/* 에러 토스트 */}
       {error && (
         <div className="app__error-toast">
           ⚠️ {error}
@@ -223,7 +259,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 관리자 페이지 (이스터에그 트리거로 진입) */}
       {adminMode === 'login' && (
         <AdminAccessModal
           onClose={handleAdminClose}

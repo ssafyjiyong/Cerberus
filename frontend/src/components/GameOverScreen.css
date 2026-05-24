@@ -35,11 +35,12 @@
 
 .gameover-screen__reason {
   font-family: var(--font-pixel);
-  font-size: clamp(9px, 1.5vw, 12px);
+  font-size: clamp(11px, 1.7vw, 14px);
   color: var(--color-fire-orange);
   text-shadow: var(--glow-orange);
   text-align: center;
   line-height: 2;
+  letter-spacing: 1.5px;
 }
 
 .gameover-screen__stats {
@@ -60,15 +61,17 @@
 
 .gameover-screen__stat-label {
   font-family: var(--font-pixel);
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-secondary);
+  letter-spacing: 1px;
 }
 
 .gameover-screen__stat-value {
   font-family: var(--font-pixel);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--color-fire-red);
   text-shadow: var(--glow-red);
+  letter-spacing: 1px;
 }
 
 .gameover-screen__skull {

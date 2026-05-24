@@ -19,7 +19,7 @@
 }
 
 .level-indicator__icon {
-  font-size: 24px;
+  font-size: 28px;
   transition: all 0.3s ease;
   filter: grayscale(0.8) brightness(0.5);
 }
@@ -49,9 +49,10 @@
 
 .level-indicator__label {
   font-family: var(--font-pixel);
-  font-size: 7px;
+  font-size: 9px;
   color: var(--text-dim);
   text-align: center;
+  letter-spacing: 1px;
 }
 
 .level-indicator__head--active .level-indicator__label {
@@ -88,15 +89,17 @@
 
 .level-indicator__prompt-label {
   font-family: var(--font-pixel);
-  font-size: 7px;
+  font-size: 9px;
   color: var(--text-dim);
+  letter-spacing: 1px;
 }
 
 .level-indicator__prompt-count {
   font-family: var(--font-pixel);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--color-neon-blue);
   text-shadow: var(--glow-blue);
+  letter-spacing: 1px;
 }
 
 .level-indicator__prompt-count--warning {

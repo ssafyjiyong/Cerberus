@@ -20,6 +20,8 @@ export default function GameScreen({
   isLoading,
   gameState,
   levelInfo,
+  stageDomain,
+  passLogic,
   onSendMessage,
 }) {
   const [inputText, setInputText] = useState('');
@@ -67,9 +69,14 @@ export default function GameScreen({
           <div>
             <div className="game-screen__level-title">
               {levelInfo?.emoji} {levelInfo?.title}
+              {passLogic && (
+                <span className={`game-screen__logic-badge game-screen__logic-badge--${passLogic.toLowerCase()}`}>
+                  {passLogic}
+                </span>
+              )}
             </div>
             <div className="game-screen__level-subtitle">
-              {levelInfo?.subtitle}
+              {stageDomain || levelInfo?.subtitle}
             </div>
           </div>
         </div>
@@ -92,11 +99,14 @@ export default function GameScreen({
         <div ref={chatEndRef} />
       </div>
 
-      {/* 레벨 클리어 오버레이 */}
-      {gameState === 'levelClear' && (
+      {/* 단계 클리어 오버레이 */}
+      {gameState === 'stageClear' && (
         <div className="game-screen__level-clear-overlay">
           <div className="game-screen__level-clear-text">
             STAGE {currentLevel} CLEAR!
+          </div>
+          <div className="game-screen__level-clear-sub">
+            다음 단계 준비 중...
           </div>
         </div>
       )}
