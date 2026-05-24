@@ -19,6 +19,8 @@
 | **5** | **Amazon Inspector 활성화** (취약점 스캔) | 쉬움 | 소액 |
 | **6** | **KMS 키 생성 + DynamoDB/EBS 암호화** | 보통 | 소액 |
 | **7** | **CloudFront + WAF + HTTPS 구성** | 보통 | 소액~중간 |
+| **추가A** | **AWS Config 활성화** (리소스 설정 변경 이력) | 쉬움 | 소액 |
+| **추가B** | **VPC 엔드포인트** (DynamoDB·Bedrock 비공개 통신) | 쉬움 | 소액 |
 
 > 0~5번은 대부분 콘솔에서 활성화 버튼만 누르면 되며, 먼저 적용할수록 좋습니다.
 
@@ -383,7 +385,147 @@ CloudFront를 거치지 않고 EC2 IP 주소로 직접 접속하는 것을 막�
 
 ---
 
-## 추가: VPC Flow Logs 설정 (선택)
+## 추가A — AWS Config 활성화 (리소스 설정 변경 이력)
+
+CloudTrail이 "누가 무슨 API를 호출했는가"를 기록한다면, **AWS Config**는
+"리소스 설정이 언제 어떻게 바뀌었는가"의 이력을 저장하고 컴플라이언스 규칙을
+자동 평가합니다. ISMS 감사 증적으로 CloudTrail과 함께 활용하면 좋습니다.
+
+> **CloudTrail과의 차이:**
+> - CloudTrail: `ec2-user 가 2025-01-01 14:00에 보안 그룹을 수정하는 API를 호출했다`
+> - AWS Config: `보안 그룹 sg-xxx의 인바운드 규칙이 [이전값] → [이후값] 으로 변경됐다`
+
+### A-1. S3 버킷 생성 (Config 로그 저장용)
+
+CloudTrail용 버킷과 분리해서 만들거나, 같은 버킷에 접두사(Prefix)를 달아 저장할 수
+있습니다. 여기서는 별도 버킷을 만드는 방법으로 안내합니다.
+
+1. AWS 콘솔 검색창에 **`S3`** 입력 → S3로 이동 → **`Create bucket`** 클릭
+2. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Bucket name** | `cerberus-config-logs-<계정ID>` (S3 버킷 이름은 전 세계 고유해야 함) |
+| **AWS Region** | `아시아 태평양(서울) ap-northeast-2` |
+| **Block Public Access** | 기본값 유지 (모두 차단) |
+| **Versioning** | `Enable` 권장 (로그 무결성) |
+| **Server-side encryption** | `SSE-S3` 또는 `SSE-KMS` (KMS 설정 완료 시 `cerberus-key` 선택) |
+
+3. **`Create bucket`** 클릭
+
+### A-2. AWS Config 활성화
+
+1. AWS 콘솔 검색창에 **`Config`** 입력 → AWS Config로 이동
+2. **`Get started`** 클릭 (처음 사용하는 경우) 또는 왼쪽 메뉴 **`Settings`**
+3. 아래와 같이 설정합니다.
+
+**Resource types to record:**
+
+| 항목 | 설정값 |
+|---|---|
+| **Recording strategy** | `All resource types` 선택 (권장) |
+| **Recording frequency** | `Continuous` (변경 발생 즉시 기록) |
+
+**Delivery method (로그 전달 위치):**
+
+| 항목 | 설정값 |
+|---|---|
+| **Amazon S3 bucket** | `Choose a bucket from your account` → A-1에서 만든 버킷 선택 |
+| **S3 key prefix** | `config` 입력 (버킷 내 폴더 구분용, 선택 사항) |
+| **Amazon SNS topic** | 일단 `None` (알림 필요 시 나중에 추가) |
+
+**AWS Config rules (선택 — 컴플라이언스 자동 평가):**
+
+규칙을 추가하면 리소스가 기준에 맞는지 자동 검사합니다. 아래 규칙을 추가하면
+데모 환경에서 ISMS 관련 항목을 자동 점검할 수 있습니다.
+
+| 규칙 이름 | 점검 내용 |
+|---|---|
+| `dynamodb-pitr-enabled` | DynamoDB PITR 활성화 여부 |
+| `dynamodb-table-encrypted-kms` | DynamoDB KMS 암호화 여부 |
+| `cloudtrail-enabled` | CloudTrail 활성화 여부 |
+| `guardduty-enabled-centralized` | GuardDuty 활성화 여부 |
+| `root-mfa-enabled` | 루트 계정 MFA 설정 여부 |
+
+4. 설정 완료 후 **`Confirm`** 클릭
+
+> Config가 시작되면 현재 리소스 상태를 전부 스냅샷하고 이후 변경을 추적합니다.
+> 처음 몇 분간 비용이 다소 높게 나타날 수 있으며, 이후 안정됩니다.
+
+---
+
+## 추가B — VPC 엔드포인트 설정 (서브넷 분리 대안)
+
+### 왜 VPC 엔드포인트인가?
+
+"백엔드를 Private 서브넷으로 분리해야 하지 않나요?" — 완전히 맞는 방향입니다.
+그러나 현재 구조(단일 EC2에 nginx + FastAPI 동거)에서 **진짜 Private 서브넷 분리**를
+구현하려면 아래가 필요합니다.
+
+```
+올바른 Public/Private 분리 구조
+────────────────────────────────────────────────
+[Public Subnet]
+  Application Load Balancer (포트 80/443)
+        │
+[Private Subnet]
+  EC2 (FastAPI만, 인터넷 직접 연결 없음)
+  NAT Gateway ← EC2의 외부 통신 경유 (Bedrock, pip, npm, git pull 등)
+```
+
+이 구조는 인프라를 새로 설계하는 것이므로 **데모 단독으로는 과도하며**,
+NAT Gateway 비용($0.045/시간 ≈ 월 $35)이 고정으로 추가됩니다.
+
+**실용적 대안:** EC2 → DynamoDB, EC2 → Bedrock 통신이 인터넷 공용망을 경유하지 않고
+AWS 내부 네트워크를 통하도록 **VPC 엔드포인트** 를 설정합니다. NAT Gateway 없이도
+트래픽이 AWS 내부에서 끝납니다.
+
+> **현재 보안 수준 참고:**
+> - FastAPI는 이미 `127.0.0.1:8000` 에만 바인딩 → 외부에서 포트 8000 직접 접근 불가
+> - 보안 그룹: 포트 80(또는 CloudFront 프리픽스)만 허용
+> - VPC 엔드포인트를 추가하면 AWS 서비스 통신 경로까지 비공개화
+
+### B-1. DynamoDB VPC 엔드포인트 생성
+
+1. AWS 콘솔 검색창에 **`VPC`** 입력 → VPC로 이동
+2. 왼쪽 메뉴 **`Endpoints`** → **`Create endpoint`** 클릭
+3. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Name tag** | `cerberus-dynamo-endpoint` |
+| **Service category** | `AWS services` |
+| **Services** 검색 | `dynamodb` 입력 → `com.amazonaws.ap-northeast-2.dynamodb` 선택 |
+| **Type** | `Gateway` (DynamoDB는 Gateway 타입, 무료) |
+| **VPC** | EC2가 속한 VPC 선택 (기본 VPC) |
+| **Route tables** | EC2 서브넷의 라우트 테이블 체크 |
+
+4. **`Create endpoint`** 클릭
+
+### B-2. Bedrock VPC 엔드포인트 생성
+
+1. VPC 콘솔 → **`Endpoints`** → **`Create endpoint`** 클릭
+2. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Name tag** | `cerberus-bedrock-endpoint` |
+| **Service category** | `AWS services` |
+| **Services** 검색 | `bedrock-runtime` 입력 → `com.amazonaws.ap-northeast-2.bedrock-runtime` 선택 |
+| **Type** | `Interface` (Bedrock은 Interface 타입, 소액 과금) |
+| **VPC** | EC2가 속한 VPC 선택 |
+| **Subnets** | EC2가 있는 서브넷 선택 |
+| **Security groups** | EC2의 보안 그룹 선택 |
+| **Private DNS names enabled** | `Enable` 체크 (코드 변경 없이 기존 SDK 엔드포인트 URL 그대로 사용) |
+
+3. **`Create endpoint`** 클릭
+
+> Interface 엔드포인트 비용: ENI당 약 $0.01/시간 ≈ 월 $7 수준.
+> "Private DNS enabled" 를 켜면 애플리케이션 코드나 `.env` 변경 없이 즉시 적용됩니다.
+
+---
+
+## 추가C — VPC Flow Logs 설정 (선택)
 
 네트워크 트래픽 기록이 필요하다면 아래 절차로 활성화합니다.
 
@@ -414,6 +556,8 @@ CloudFront를 거치지 않고 EC2 IP 주소로 직접 접속하는 것을 막�
 - [ ] STEP 5: Inspector 콘솔에서 EC2 인스턴스 스캔 시작 확인
 - [ ] STEP 6: KMS `cerberus-key` 생성, DynamoDB 3개 테이블 암호화 유형이 `AWS owned key` → `Customer managed key` 로 변경됨 확인
 - [ ] STEP 7: CloudFront 배포 `Enabled`, WAF Web ACL 연결 확인, EC2 보안 그룹 HTTP 소스가 CloudFront 프리픽스로 변경됨 확인
+- [ ] 추가A: AWS Config 콘솔에서 리소스 기록 시작 확인, S3 버킷에 로그 파일 생성 확인
+- [ ] 추가B: VPC 콘솔 Endpoints 목록에 `cerberus-dynamo-endpoint`(Gateway), `cerberus-bedrock-endpoint`(Interface) 상태 `Available` 확인
 
 ---
 
@@ -429,7 +573,10 @@ CloudFront를 거치지 않고 EC2 IP 주소로 직접 접속하는 것을 막�
 | DynamoDB PITR | 월 $0.2/GB (데이터 소량) |
 | CloudFront | 월 $1~5 (트래픽 소량) |
 | WAF | 월 $5~10 (Web ACL + 규칙 기본료) |
-| **합계 (추정)** | **월 $10~30** |
+| AWS Config | 월 $2~5 (기록 항목 수 기반) |
+| VPC 엔드포인트 (Bedrock Interface) | 월 $7 내외 (ENI 1개) |
+| VPC 엔드포인트 (DynamoDB Gateway) | 무료 |
+| **합계 (추정, 추가 항목 포함)** | **월 $20~50** |
 
 > AWS Budgets에서 월 예산 알림을 설정해 두면 예상치 못한 과금을 방지할 수 있습니다.
 > 콘솔 검색창에 `Budgets` 검색 → `Create budget` → `Monthly cost budget` → 한도 금액 입력.
