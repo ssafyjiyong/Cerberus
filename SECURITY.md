@@ -1,274 +1,435 @@
-# Cerberus 보안 아키텍처 가이드 (AWS)
+# Cerberus 보안 설정 가이드 (AWS)
 
-Cerberus는 **ISMS 정보보호 인증 심사**를 주제로 한 프로젝트입니다. 따라서
-애플리케이션이 올라가는 배포 환경 자체도 AWS 보안 모범사례를 반영하는 것이
-바람직합니다. 이 문서는 어떤 AWS 보안 서비스를 **이 프로젝트에 실제로 적용할
-가치가 있는지** 우선순위별로 정리하고, 단계별 적용 방법을 안내합니다.
+이 문서는 **DEPLOYMENT.md 배포 완료 후**, 보안을 강화하는 절차를 단계별로 안내합니다.
+위에서부터 순서대로, 한 단계도 건너뛰지 말고 진행하세요.
 
-> 전제: `DEPLOYMENT.md` 에 따라 단일 EC2 + nginx 구성으로 배포된 상태.
+> **전제:** `DEPLOYMENT.md` 에 따라 EC2 + nginx 구성으로 이미 배포된 상태여야 합니다.
 
 ---
 
-## 0. 핵심 원칙 — 규모에 맞는 보안
-
-요청된 보안 서비스 목록에는 **단일 애플리케이션용 서비스**와 **조직(다계정)
-전체를 관리하는 거버넌스 서비스**가 섞여 있습니다. 데모 앱 하나에 조직용
-서비스(Control Tower, Landing Zone 등)를 새로 구축하는 것은 과도하며, 비용과
-운영 부담만 늘립니다. 그래서 두 단계로 구분합니다.
-
-| 구분 | 의미 | 이 프로젝트에서 |
-|---|---|---|
-| **Tier 1** | 단일 앱 배포에 직접 적용하는 보안 | **지금 바로 적용 권장** |
-| **Tier 2** | 조직(다계정) 단위 거버넌스 | 회사 전체 AWS 환경이 있을 때만 / 데모 단독은 불필요 |
-
----
-
-## 1. 적용 대상 요약
-
-| 서비스 | 분류 | 역할 | 권장 |
-|---|---|---|---|
-| IAM | Tier 1 | 최소 권한 접근 제어 (서비스 간) | ✅ 이미 적용 |
-| 관리자 페이지 인증 | Tier 1 | bcrypt 해시 + 8h 베어러 토큰 (앱 관리자) | ✅ 이미 적용 (배포 직후 기본 비밀번호 변경 필수) |
-| AWS KMS | Tier 1 | 저장 데이터 암호화 | ✅ 적용 |
-| CloudTrail / VPC Flow Logs | Tier 1 | 보안 로그 수집 | ✅ 적용 |
-| GuardDuty | Tier 1 | 위협 탐지 | ✅ 적용 (클릭) |
-| Security Hub | Tier 1 | 보안 통합 대시보드 | ✅ 적용 (클릭) |
-| Amazon Inspector ("Security agent") | Tier 1 | 취약점(CVE) 스캔 | ✅ 적용 (클릭) |
-| AWS WAF + CloudFront | Tier 1 | 웹 공격 차단 + HTTPS | ✅ 적용 권장 |
-| AWS Shield (DDoS) | Tier 1 | DDoS 방어 | ✅ Standard 자동 |
-| DR (재해 복구) | Tier 1 | 백업·복구 | ✅ 적용 |
-| AWS Organizations | Tier 2 | 다계정 통합 관리 | ⚪ 다계정 환경 전제 |
-| AWS Control Tower | Tier 2 | 멀티계정 랜딩존 자동 구성 | ⚪ 다계정 환경 전제 |
-| AWS 랜딩 존 (보안 영역) | Tier 2 | 보안/로그 전용 계정 분리 | ⚪ 다계정 환경 전제 |
-| AWS Firewall Manager | Tier 2 | 다계정 방화벽 정책 중앙 관리 | ⚪ Organizations 전제 |
-| DLP (Amazon Macie) | 검토 | 민감정보 탐지 | 🔸 현재 PII 미수집, 우선순위 낮음 |
-
----
-
-# Tier 1 — 지금 바로 적용
-
-## 2.1 IAM — 최소 권한 접근 제어 (이미 적용됨)
-
-이미 적용된 사항:
-
-- 애플리케이션은 `aws/iam-policy.json` 의 **최소 권한 정책**만 사용 (Bedrock 호출 +
-  지정된 DynamoDB 테이블 접근만 허용).
-- EC2는 액세스 키를 서버에 저장하지 않고 **IAM 역할(`cerberus-ec2-role`)** 로
-  권한을 받습니다 (`DEPLOYMENT.md` STEP 2).
-
-추가로 권장하는 계정 위생(hygiene):
-
-- **루트 계정 사용 금지** — 일상 작업은 IAM 사용자/역할로. 루트에는 **MFA** 필수.
-- 관리자도 개인별 IAM 사용자 + MFA 사용, 권한은 그룹으로 부여.
-- 액세스 키는 만들지 않거나, 만들면 정기적으로 교체(rotate).
-- IAM Access Analyzer 활성화 — 의도치 않게 외부에 노출된 권한을 탐지.
-
-### 2.1.1 관리자 페이지 인증
-
-애플리케이션 내부에는 별도의 **관리자 페이지**가 있습니다 (`ADMIN.md` 참고).
-이 페이지는 IAM 과는 무관한 자체 인증을 사용합니다.
-
-- **비밀번호 저장:** bcrypt 해시로 DynamoDB `cerberus-leaderboard-config` 테이블에 저장
-- **세션:** 8시간 만료 베어러 토큰 (인메모리 — 서버 재시작 시 모두 무효화)
-- **🔴 배포 직후 가장 먼저 할 일:** 기본 비밀번호 `mzcadmin` 을 강력한 비밀번호로 변경
-  (`ADMIN.md` §5 참고). 게임 자체가 ISMS 통과 기준을 다루므로 관리자 비밀번호도
-  동일 기준(8자 이상, 영문·숫자·특수문자 조합, 분기 1회 변경)을 적용하세요.
-- **추가 강화:** 관리자 페이지를 사무실 IP 등에서만 사용한다면, 2.7의 CloudFront +
-  WAF 구성에 **`/api/admin/*` 경로 한정 IP 화이트리스트 룰**을 추가하는 것을 권장합니다.
-
-## 2.2 AWS KMS — 저장 데이터 암호화
-
-게임 로그·랭킹·관리자 설정 데이터를 **고객 관리형 키(CMK)** 로 암호화합니다.
-
-1. 콘솔 > **KMS** > `Create key` > `Symmetric` > 별칭 `cerberus-key` 생성.
-2. 콘솔 > **DynamoDB** > 각 테이블 > `Additional settings` > `Encryption` >
-   **"Stored in your account, owned and managed by you"** 선택 > `cerberus-key` 지정.
-   대상 테이블 3개: `cerberus-leaderboard`, `cerberus-leaderboard-logs`,
-   **`cerberus-leaderboard-config`** (관리자 비밀번호 해시가 저장되므로 특히 권장).
-3. EC2의 **EBS 볼륨 암호화** — 인스턴스 생성 시 기본 활성화 권장. (이미 만든
-   인스턴스라면, 암호화된 스냅샷에서 새 볼륨을 만들어 교체.)
-4. 애플리케이션이 암호화된 테이블을 읽고 쓸 수 있도록, `aws/iam-policy.json` 의
-   **`KMSForEncryptedTables`** 구문의 `<KMS_KEY_ARN>` 를 1번에서 만든 키의 ARN으로
-   바꾼 뒤 `cerberus-policy` 정책을 업데이트합니다.
-
-> CMK를 쓰지 않아도 DynamoDB는 기본적으로 AWS 소유 키로 암호화됩니다. CMK는
-> 키 접근 감사·교체·정책 통제가 필요할 때의 강화 옵션입니다.
-
-## 2.3 보안 로그 수집 — CloudTrail · VPC Flow Logs · CloudWatch
-
-"누가, 언제, 무엇을 했는가"를 기록해 사고 조사와 ISMS 감사 증적을 확보합니다.
-
-- **CloudTrail (필수)** — 모든 AWS API 호출 기록.
-  콘솔 > CloudTrail > `Create trail` > 이름 `cerberus-trail` > 로그 저장용 S3 버킷
-  생성 > (선택) 로그 파일 무결성 검증 활성화.
-- **VPC Flow Logs** — 네트워크 트래픽 기록.
-  콘솔 > VPC > 해당 VPC 선택 > `Flow logs` 탭 > `Create flow log` > 대상
-  CloudWatch Logs 또는 S3.
-- **애플리케이션/웹 로그** — EC2에 CloudWatch Agent를 설치해 백엔드 로그
-  (`journalctl`)와 nginx 로그(`/var/log/nginx/*`)를 CloudWatch Logs로 수집하면
-  서버에 들어가지 않고도 로그를 조회·알람할 수 있습니다.
-- 보안 로그를 담는 S3 버킷은 **퍼블릭 액세스 차단 + KMS 암호화 + 버전 관리**를
-  켜고, 객체 잠금(Object Lock)으로 변조를 방지하면 더욱 안전합니다.
-
-## 2.4 GuardDuty — 위협 탐지
-
-CloudTrail·VPC Flow Logs·DNS 로그를 머신러닝으로 분석해 악성 행위(비정상
-API 호출, 알려진 악성 IP 통신, 암호화폐 채굴 등)를 자동 탐지합니다.
-
-- 콘솔 > **GuardDuty** > `Enable GuardDuty` — 사실상 클릭 한 번으로 끝.
-- 탐지 결과(Findings)는 Security Hub로 자동 전달됩니다(2.5).
-- 30일 무료 평가판 제공, 이후 분석량 기반 과금(데모 트래픽은 소액).
-
-## 2.5 Security Hub — 보안 통합 대시보드
-
-GuardDuty·Inspector 등의 탐지 결과를 한 곳에 모으고, **AWS 기초 보안 모범사례
-(AWS Foundational Security Best Practices)** 및 **CIS 벤치마크** 기준으로 계정
-설정을 자동 점검해 점수화합니다.
-
-- 콘솔 > **Security Hub** > `Go to Security Hub` > 보안 표준 선택 후 활성화.
-- "S3 버킷이 공개돼 있음", "MFA 미설정" 같은 항목을 점검표로 보여줍니다 —
-  ISMS 점검 항목과 직접 대응되므로 이 프로젝트와 특히 잘 맞습니다.
-
-## 2.6 Amazon Inspector — 취약점 스캔 ("Security agent")
-
-별도의 보안 에이전트 대신, Amazon Linux 2023에 기본 탑재된 **SSM Agent**를
-활용해 EC2의 OS·설치 패키지에서 알려진 취약점(CVE)을 지속 스캔합니다.
-
-- 콘솔 > **Inspector** > `Activate Inspector` — EC2를 자동 발견해 스캔.
-- 컨테이너 이미지·Lambda로 확장 시에도 동일 콘솔에서 관리.
-- (선택) GuardDuty의 **Runtime Monitoring** 을 켜면 런타임 행위 기반 탐지를
-  위한 경량 에이전트가 추가됩니다.
-
-## 2.7 AWS WAF + CloudFront — 웹 공격 차단 & HTTPS
-
-> **중요:** AWS WAF는 EC2 인스턴스에 직접 붙지 않습니다. 앞단에 **CloudFront**
-> (또는 ALB)가 있어야 합니다. CloudFront를 두면 WAF·HTTPS·DDoS 방어·캐싱을
-> 한 번에 얻을 수 있어 권장합니다.
-
-1. **ACM 인증서** — CloudFront용 인증서는 `us-east-1` 리전에서 발급(무료).
-2. **CloudFront 배포 생성** — Origin을 EC2의 퍼블릭 DNS로 지정,
-   `Viewer protocol policy` 를 `Redirect HTTP to HTTPS` 로 설정.
-3. **WAF Web ACL 생성 후 CloudFront에 연결** — 아래 관리형 규칙을 추가:
-   - `AWSManagedRulesCommonRuleSet` (XSS 등 일반 공격)
-   - `AWSManagedRulesSQLiRuleSet` (SQL 인젝션)
-   - `AWSManagedRulesAmazonIpReputationList` (악성 IP 평판)
-   - **Rate-based rule** — 단일 IP의 과도한 요청 차단 (L7 DDoS·봇 완화)
-4. **오리진 보호** — EC2 보안 그룹의 80번 포트를 `0.0.0.0/0` 대신 CloudFront의
-   관리형 프리픽스 목록(`com.amazonaws.global.cloudfront.origin-facing`)으로
-   제한하면, 사용자가 CloudFront를 우회해 EC2에 직접 접근하지 못합니다.
-
-## 2.8 AWS Shield — DDoS 방어
-
-- **Shield Standard** — CloudFront·Route 53·ALB에 **자동·무료**로 적용됩니다.
-  즉 2.7에서 CloudFront를 도입하면 네트워크 계층(L3/L4) DDoS 방어가 자동 포함됩니다.
-- 애플리케이션 계층(L7) 공격은 2.7의 **WAF rate-based rule** 로 보강합니다.
-- **Shield Advanced** 는 월 $3,000 수준의 엔터프라이즈 서비스로, 데모에는 불필요합니다.
-
-## 2.9 DR — 재해 복구
-
-서버나 데이터가 손상돼도 빠르게 복구할 수 있도록 준비합니다.
-
-- **데이터(DynamoDB):**
-  - **3개 테이블 모두**(`cerberus-leaderboard`, `cerberus-leaderboard-logs`,
-    `cerberus-leaderboard-config`) **PITR(Point-in-time recovery)** 활성화 —
-    최근 35일 내 임의 시점으로 복구 가능 (콘솔 > 테이블 > `Backups` 탭).
-    설정(config) 테이블은 관리자가 편집한 문제·통과 기준이 모두 들어 있으므로
-    특히 PITR 적용을 권장합니다.
-  - 정기 **온디맨드 백업** 또는 AWS Backup으로 백업 일정 구성.
-  - 관리자 페이지의 **JSON 내보내기**(`ADMIN.md` §2.1)로 문제 세트를 별도
-    파일로도 백업해 두면 빠른 복구·이관에 유용합니다.
-- **서버(EC2):**
-  - **AMI(머신 이미지)** 를 정기 생성 — 동일 구성의 서버를 즉시 재기동 가능.
-  - **EBS 스냅샷** 자동 일정 구성 (Data Lifecycle Manager).
-- **코드/설정:** 코드는 GitHub에 보관(원본). `.env` 는 git에 포함되지 않으므로
-  Secrets Manager 또는 안전한 별도 위치에 사본 보관.
-- **복구 절차:** 서버 손실 시 `DEPLOYMENT.md` 를 그대로 재실행해 새 EC2를
-  구성하고, DynamoDB는 PITR로 복원 → 인메모리 세션 특성상 진행 중이던 게임만
-  초기화되고 랭킹·로그는 보존됩니다.
-- 데모 기준 목표: **RPO**(데이터 손실 허용폭) 약 24시간, **RTO**(복구 소요시간)
-  약 1시간. 요구 수준이 높아지면 다중 AZ·다중 리전 구성을 검토합니다.
-
----
-
-# Tier 2 — 조직(다계정) 단위 거버넌스
-
-아래 서비스들은 **여러 AWS 계정을 운영하는 조직 전체**를 통제하기 위한
-것입니다. Cerberus 데모 하나만을 위해 새로 구축할 필요는 없습니다. 다만 이
-프로젝트가 **회사의 표준 AWS 환경에 편입**된다면, 그 환경이 이미 제공하는
-정책을 그대로 상속받게 됩니다.
-
-## 3.1 AWS Organizations
-
-여러 AWS 계정을 하나의 조직으로 묶어 통합 결제하고, **SCP(서비스 제어 정책)**
-로 계정 전체에 권한 가드레일을 겁니다. 모든 Tier 2 서비스의 전제 조건입니다.
-→ *단일 계정 데모에는 불필요. 회사가 다계정을 운영한다면 이미 구성돼 있을 것입니다.*
-
-## 3.2 AWS Control Tower
-
-Organizations 위에서 **모범사례 멀티계정 환경을 자동으로 구성**해 주는
-서비스입니다. 보안 가드레일, 로그 집계, 계정 생성 자동화(Account Factory)를 제공합니다.
-→ *조직 차원의 클라우드 거버넌스를 처음 세울 때 사용. 데모 범위 밖.*
-
-## 3.3 AWS 랜딩 존 (보안 영역)
-
-"랜딩 존"은 Control Tower가 만들어 내는 **결과물**입니다 — 보안 전용 계정과
-로그 아카이브 계정을 분리하고, 네트워크·암호화·로깅의 기준선(baseline)을
-적용한 표준 다계정 구조입니다.
-→ *Control Tower 도입 시 함께 구성됨. 데모 단독으로는 해당 없음.*
-
-## 3.4 AWS Firewall Manager
-
-Organizations에 속한 **모든 계정·리소스에 WAF/Shield/보안 그룹 정책을 중앙에서
-일괄 적용·강제**합니다.
-→ *관리 대상이 여러 개일 때 의미가 있음. 이 프로젝트는 2.7처럼 WAF를 직접
-연결하면 충분합니다.*
-
-> **요약:** Tier 2는 "Organizations 활성화"가 출발점입니다. Cerberus가 회사
-> 표준 AWS 계정 구조 위에 배포된다면, 그 구조의 Control Tower 가드레일과
-> Firewall Manager 정책을 자동으로 적용받습니다. **데모만을 위해 별도로 구축할
-> 필요는 없습니다.**
-
----
-
-## 4. DLP (데이터 유출 방지) — 적용 범위 검토
-
-- AWS의 네이티브 DLP 서비스는 **Amazon Macie** 로, 주로 **S3에 저장된** 데이터에서
-  개인정보·기밀정보를 자동 탐지·분류합니다. Macie는 DynamoDB는 스캔하지 않습니다.
-- 이 프로젝트가 저장하는 잠재적 민감 데이터는 `user_message`(사용자가 입력한
-  ISMS 답변)입니다. 현재는 이름·연락처 같은 **개인정보(PII)를 수집하지 않으므로**
-  DLP 우선순위는 낮습니다.
-- 강화가 필요하다면:
-  - 분석 로그를 S3로 내보내는 파이프라인을 만들 경우, 그 버킷에 **Macie** 적용.
-  - 또는 `user_message` 저장 전에 민감 패턴(주민번호·이메일 등)을 **마스킹/익명화**.
-  - 게임 UI에 "답변에 개인정보를 입력하지 마세요" 안내 문구 추가.
-
----
-
-## 5. 권장 적용 순서
-
-비용·난이도 대비 효과가 큰 순서입니다. 위에서부터 차례로 적용하면 됩니다.
+## 0. 무엇을 하게 되나요?
 
 | 순서 | 작업 | 난이도 | 비용 |
 |---|---|---|---|
-| 0 | **관리자 페이지 기본 비밀번호 변경** (`mzcadmin` → 강력한 비밀번호) | 매우 쉬움 | 무료 |
-| 1 | IAM 최소 권한 · 루트 MFA | (이미 적용) | 무료 |
-| 2 | DynamoDB PITR 활성화 (3개 테이블 모두 — DR) | 매우 쉬움 (클릭) | 소액 |
-| 3 | GuardDuty 활성화 | 매우 쉬움 (클릭) | 소액 |
-| 4 | Security Hub 활성화 | 매우 쉬움 (클릭) | 소액 |
-| 5 | CloudTrail 추적(Trail) 생성 | 쉬움 | 소액 (S3 비용) |
-| 6 | Amazon Inspector 활성화 | 쉬움 (클릭) | 소액 |
-| 7 | KMS 키 생성 + DynamoDB 3개 테이블/EBS 암호화 | 보통 | 소액 |
-| 8 | CloudFront + WAF + HTTPS 구성 (가능하면 `/api/admin/*` IP 화이트리스트) | 보통 | 소액~중간 |
+| **0** | **관리자 비밀번호 변경 (필수)** | 매우 쉬움 | 무료 |
+| **1** | **DynamoDB PITR 활성화** (데이터 백업) | 매우 쉬움 | 소액 |
+| **2** | **GuardDuty 활성화** (위협 탐지) | 매우 쉬움 | 소액 |
+| **3** | **Security Hub 활성화** (보안 대시보드) | 매우 쉬움 | 소액 |
+| **4** | **CloudTrail 추적 생성** (API 로그) | 쉬움 | 소액 |
+| **5** | **Amazon Inspector 활성화** (취약점 스캔) | 쉬움 | 소액 |
+| **6** | **KMS 키 생성 + DynamoDB/EBS 암호화** | 보통 | 소액 |
+| **7** | **CloudFront + WAF + HTTPS 구성** | 보통 | 소액~중간 |
 
-> 2~6번은 대부분 콘솔에서 활성화 버튼만 누르면 되며, 효과 대비 비용이 낮아
-> 가장 먼저 적용할 것을 권장합니다.
+> 0~5번은 대부분 콘솔에서 활성화 버튼만 누르면 되며, 먼저 적용할수록 좋습니다.
 
 ---
 
-## 6. 비용에 대한 참고
+## STEP 0 — 관리자 비밀번호 변경 (필수)
 
-Tier 1 서비스 대부분은 데모 수준 트래픽에서 **월 수 달러~수십 달러** 규모입니다
-(GuardDuty·Security Hub·Inspector·CloudTrail·CloudFront 합산). Shield Advanced나
-Tier 2 거버넌스 서비스처럼 고비용 항목은 이 프로젝트에 포함하지 않았습니다.
-정확한 비용은 AWS Pricing Calculator로 사전 산정하고, **AWS Budgets** 로 월
-예산 알림을 설정해 두는 것을 권장합니다.
+배포 직후 기본 비밀번호 `mzcadmin` 이 그대로 노출된 상태입니다. **가장 먼저** 변경하세요.
+
+1. 브라우저에서 사이트 시작 화면으로 이동합니다.
+2. **키보드로 `admin` 입력** (또는 케르베로스 첫 번째 머리를 5회 클릭)
+3. 비밀번호 입력창에 `mzcadmin` 입력 → 관리자 페이지 진입
+4. 상단 탭에서 **운영** 클릭 → 하단 **관리자 비밀번호 변경** 섹션에서 새 비밀번호 설정
+   - 8자 이상, 영문 + 숫자 + 특수문자 조합을 권장합니다.
+5. **변경** 버튼 클릭 → "비밀번호가 변경되었습니다" 메시지 확인
+
+> 관리자 페이지의 전체 사용법은 `ADMIN.md` 를 참고하세요.
+
+---
+
+## STEP 1 — DynamoDB PITR 활성화 (데이터 백업)
+
+PITR(Point-in-time recovery)을 켜면 최근 35일 이내 어느 시점으로든 데이터를 복구할 수 있습니다.
+아래 3개 테이블 모두에 적용합니다.
+
+- `cerberus-leaderboard`
+- `cerberus-leaderboard-logs`
+- `cerberus-leaderboard-config` ← 문제 세트·관리자 설정이 들어 있으므로 특히 중요
+
+**각 테이블마다 아래 절차를 반복합니다 (3회):**
+
+1. AWS 콘솔 검색창에 **`DynamoDB`** 입력 → DynamoDB로 이동
+2. 왼쪽 메뉴 **`Tables`** 클릭 → 테이블 이름 클릭
+3. 상단 탭 중 **`Backups`** 클릭
+4. **`Enable`** 버튼 클릭 (Point-in-time recovery 항목 옆)
+5. "PITR is enabled" 상태가 되면 완료
+
+---
+
+## STEP 2 — GuardDuty 활성화 (위협 탐지)
+
+AWS API 호출·네트워크 트래픽을 머신러닝으로 분석해 비정상 행위(악성 IP 통신, 암호화폐 채굴, 비정상 API 호출 등)를 자동 탐지합니다.
+
+1. AWS 콘솔 검색창에 **`GuardDuty`** 입력 → GuardDuty로 이동
+2. 화면 중앙의 **`Get Started`** 버튼 클릭
+3. **`Enable GuardDuty`** 버튼 클릭
+
+이것으로 완료입니다. 탐지 결과는 STEP 3의 Security Hub와 자동으로 연동됩니다.
+
+> 30일 무료 평가판이 제공됩니다. 이후 분석 데이터양에 따라 소액 과금됩니다.
+
+---
+
+## STEP 3 — Security Hub 활성화 (보안 통합 대시보드)
+
+GuardDuty·Inspector 등의 탐지 결과를 한 곳에서 보고, 계정 설정의 보안 점수를 자동으로 점검합니다.
+
+1. AWS 콘솔 검색창에 **`Security Hub`** 입력 → Security Hub로 이동
+2. **`Go to Security Hub`** 버튼 클릭
+3. **보안 표준 선택** 화면에서 아래 항목을 체크합니다.
+   - ✅ `AWS Foundational Security Best Practices` (권장)
+   - ✅ `CIS AWS Foundations Benchmark` (선택, ISMS 항목과 유사)
+4. **`Enable Security Hub`** 버튼 클릭
+
+이후 콘솔에서 보안 점수와 미흡 항목을 확인할 수 있습니다.
+
+---
+
+## STEP 4 — CloudTrail 추적 생성 (API 로그)
+
+"누가, 언제, 무슨 AWS API를 호출했는가"를 기록해 사고 조사와 감사 증적을 확보합니다.
+
+1. AWS 콘솔 검색창에 **`CloudTrail`** 입력 → CloudTrail로 이동
+2. 왼쪽 메뉴 **`Trails`** → **`Create trail`** 클릭
+3. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Trail name** | `cerberus-trail` |
+| **Storage location** | `Create new S3 bucket` 선택 → 이름 자동 생성 또는 직접 입력 (예: `cerberus-trail-로그`) |
+| **Log file SSE-KMS encryption** | 일단 `Disabled` (KMS 설정 후 STEP 6에서 활성화 가능) |
+| **Log file validation** | `Enabled` ← 로그 무결성 검증, 켜두는 것을 권장 |
+| **CloudWatch Logs** | `Enabled` → **New** 선택, 로그 그룹 이름 `cerberus-cloudtrail` → IAM 역할 `New` 선택 → 자동 생성 이름 그대로 사용 |
+
+4. **`Next`** 클릭 → **이벤트 유형 선택** 에서 기본값(`Management events`) 유지 → **`Next`**
+5. 설정 요약 확인 후 **`Create trail`** 클릭
+
+---
+
+## STEP 5 — Amazon Inspector 활성화 (EC2 취약점 스캔)
+
+EC2 인스턴스의 OS와 설치된 패키지에서 알려진 취약점(CVE)을 지속 스캔합니다.
+
+1. AWS 콘솔 검색창에 **`Inspector`** 입력 → Amazon Inspector로 이동
+2. **`Get started`** 버튼 클릭
+3. **`Activate Inspector`** 버튼 클릭
+
+Inspector가 계정 내 EC2 인스턴스를 자동 발견해 스캔을 시작합니다. 탐지 결과는 Security Hub와 자동 연동됩니다.
+
+> Amazon Linux 2023에는 SSM Agent가 기본 설치되어 있어 별도 에이전트 없이 동작합니다.
+
+---
+
+## STEP 6 — KMS 키 생성 + DynamoDB / EBS 암호화
+
+게임 로그·랭킹·관리자 설정 데이터를 **고객 관리형 키(CMK)** 로 암호화합니다.
+
+### 6-1. KMS 키 만들기
+
+1. AWS 콘솔 검색창에 **`KMS`** 입력 → Key Management Service로 이동
+2. 왼쪽 메뉴 **`Customer managed keys`** → **`Create key`** 클릭
+
+**[Step 1: Configure key]**
+
+| 항목 | 설정값 |
+|---|---|
+| **Key type** | `Symmetric` (대칭키 — 암호화·복호화 모두에 사용) |
+| **Key usage** | `Encrypt and decrypt` |
+| **Advanced options** | 기본값 그대로 유지 (`KMS` / `Single-Region key`) |
+
+**`Next`** 클릭
+
+**[Step 2: Add labels]**
+
+| 항목 | 설정값 |
+|---|---|
+| **Alias** | `cerberus-key` |
+| **Description** | `Cerberus DynamoDB encryption key` (선택 사항) |
+| **Tags** | 입력하지 않아도 됩니다 |
+
+**`Next`** 클릭
+
+**[Step 3: Define key administrative permissions]**
+
+이 화면은 "이 키 자체를 관리(삭제·정책 변경 등)할 수 있는 IAM 사용자/역할"을 지정합니다.
+
+1. 검색창에 현재 콘솔에 로그인한 **IAM 사용자 이름**을 입력합니다.
+   - 콘솔 오른쪽 위 계정 이름을 클릭하면 현재 IAM 사용자 이름을 확인할 수 있습니다.
+   - 루트 계정으로 로그인 중이라면 아무것도 선택하지 않아도 루트는 항상 키를 관리할 수 있습니다.
+2. 검색 결과에서 해당 사용자 **체크박스에 체크** 합니다.
+3. 하단 **`Allow key administrators to delete this key`** 체크박스는 **체크된 상태 유지**합니다.
+
+> **데모 용도이므로** 별도의 키 관리자 계정이나 조직 정책 연동은 필요 없습니다.
+> 현재 작업 중인 IAM 사용자(또는 루트)를 키 관리자로 지정하면 충분합니다.
+
+**`Next`** 클릭
+
+**[Step 4: Define key usage permissions]**
+
+이 화면은 "이 키로 실제 데이터를 암호화·복호화할 수 있는 IAM 사용자/역할"을 지정합니다.
+EC2가 DynamoDB에 접근할 때 이 키를 사용해야 하므로, EC2 역할을 추가합니다.
+
+1. 검색창에 **`cerberus-ec2-role`** 을 입력합니다.
+2. 검색 결과에서 **`cerberus-ec2-role`** 체크박스에 체크합니다.
+
+**`Next`** 클릭
+
+**[Step 5: Review]**
+
+설정 요약을 확인하고 **`Finish`** 클릭합니다.
+
+완료 후 키 목록에서 **`cerberus-key`** 를 클릭해 상세 페이지를 엽니다.
+**`General configuration`** 섹션의 **`Key ARN`** 값을 복사해 메모장에 붙여넣으세요.
+(형식 예시: `arn:aws:kms:ap-northeast-2:123456789012:key/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+
+---
+
+### 6-2. IAM 정책에 KMS 키 ARN 등록
+
+EC2 서버가 암호화된 DynamoDB 테이블을 읽고 쓸 수 있도록, 기존 IAM 정책을 업데이트합니다.
+
+1. AWS 콘솔에서 **`IAM`** → 왼쪽 **`Policies`** → **`cerberus-policy`** 검색 후 클릭
+2. **`Edit`** 버튼 클릭 → **`JSON`** 탭 클릭
+3. JSON 본문에서 `"KMSForEncryptedTables"` 구문을 찾아 `<KMS_KEY_ARN>` 부분을
+   위에서 복사한 키 ARN으로 교체합니다.
+4. **`Next`** → **`Save changes`** 클릭
+
+---
+
+### 6-3. DynamoDB 테이블 암호화 방식 변경
+
+아래 3개 테이블 모두에 적용합니다. **각 테이블마다 반복합니다 (3회).**
+
+1. AWS 콘솔에서 **`DynamoDB`** → **`Tables`** → 테이블 이름 클릭
+2. 상단 탭 중 **`Additional settings`** 클릭
+3. **`Encryption`** 섹션 → **`Manage encryption`** 클릭
+4. 아래와 같이 선택합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Encryption type** | `Stored in your account, owned and managed by you` 선택 |
+| **KMS key** | `Choose a different AWS KMS key` → `cerberus-key` 검색 후 선택 |
+
+5. **`Save changes`** 클릭
+
+대상 테이블:
+- `cerberus-leaderboard`
+- `cerberus-leaderboard-logs`
+- `cerberus-leaderboard-config` ← 관리자 비밀번호 해시가 저장되므로 특히 중요
+
+---
+
+### 6-4. EC2 EBS 볼륨 암호화 (선택)
+
+현재 EC2 인스턴스에 연결된 EBS 볼륨이 암호화되어 있는지 확인합니다.
+
+1. AWS 콘솔에서 **`EC2`** → 왼쪽 메뉴 **`Volumes`** 클릭
+2. `cerberus-server` 와 연결된 볼륨을 클릭 → **`Encryption`** 항목 확인
+   - 이미 암호화되어 있으면 완료입니다.
+   - 암호화되어 있지 않으면 아래 절차를 따릅니다.
+
+**암호화되지 않은 기존 볼륨 교체 방법:**
+
+```
+① 볼륨 선택 → 우클릭(또는 Actions) → [Create snapshot]
+   Snapshot 이름: cerberus-server-snap
+
+② EC2 콘솔 왼쪽 메뉴 [Snapshots] → 방금 만든 스냅샷 선택
+   → Actions → [Copy snapshot]
+   → [Encryption] 체크 → KMS key: cerberus-key 선택 → [Copy snapshot]
+
+③ 암호화된 새 스냅샷에서 → Actions → [Create volume from snapshot]
+   → 원래 볼륨과 동일한 AZ(가용 영역) 선택 → [Create volume]
+
+④ EC2 인스턴스 중지(Stop) → 기존 볼륨 분리(Detach) → 새 볼륨 연결(Attach, /dev/xvda)
+   → 인스턴스 시작(Start)
+```
+
+> 새 EC2 인스턴스를 만들 때는 **`Advanced`** 설정에서 `Encrypted: Yes` 를 선택하면
+> 처음부터 암호화된 볼륨이 생성됩니다.
+
+---
+
+## STEP 7 — CloudFront + WAF + HTTPS 구성
+
+> **중요:** AWS WAF는 EC2에 직접 붙지 않습니다. 앞단에 **CloudFront** 가 있어야 합니다.
+> CloudFront를 두면 WAF · HTTPS · DDoS 방어 · 캐싱을 한 번에 얻습니다.
+
+### 7-1. ACM 인증서 발급 (HTTPS용)
+
+> ⚠️ CloudFront용 인증서는 반드시 **`us-east-1 (버지니아 북부)`** 리전에서 발급해야 합니다.
+> 이것은 AWS의 고정 사양입니다. 다른 리전에서 발급한 인증서는 CloudFront에 연결되지 않습니다.
+
+1. AWS 콘솔 오른쪽 위 리전 선택 드롭다운에서 **`US East (N. Virginia) us-east-1`** 로 변경합니다.
+2. 검색창에 **`Certificate Manager`** 입력 → ACM으로 이동
+3. **`Request a certificate`** 클릭
+4. **`Request a public certificate`** 선택 → **`Next`**
+5. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Fully qualified domain name** | 사용할 도메인 입력 (예: `cerberus.example.com`) |
+| **Validation method** | `DNS validation` 권장 |
+| **Key algorithm** | `RSA 2048` (기본값 그대로) |
+
+6. **`Request`** 클릭 → 인증서가 `Pending validation` 상태로 생성됨
+7. 인증서를 클릭 → **`Domains`** 섹션의 **CNAME 이름 · 값**을 복사해
+   도메인 등록 업체의 DNS 관리 화면에서 CNAME 레코드를 추가합니다.
+8. DNS 전파 후 (수 분~1시간) 인증서 상태가 **`Issued`** 로 변경됩니다.
+
+> 도메인이 없고 IP 주소만 사용하는 경우, 이 단계를 건너뜁니다.
+> CloudFront는 도메인 없이도 생성되며 HTTP→HTTPS 리디렉션만 불가합니다.
+
+### 7-2. CloudFront 배포 생성
+
+> ACM 인증서 발급 후 리전을 다시 **`ap-northeast-2 (서울)`** 로 돌려도 됩니다.
+> CloudFront는 글로벌 서비스이므로 어느 리전에서 접근해도 같습니다.
+
+1. AWS 콘솔 검색창에 **`CloudFront`** 입력 → CloudFront로 이동
+2. **`Create distribution`** 클릭
+3. 아래와 같이 설정합니다.
+
+**Origin 설정:**
+
+| 항목 | 설정값 |
+|---|---|
+| **Origin domain** | EC2의 퍼블릭 DNS 이름 입력 (예: `ec2-13-x-x-x.ap-northeast-2.compute.amazonaws.com`) |
+| **Protocol** | `HTTP only` (EC2 앞단에는 HTTP로 통신, CloudFront가 사용자와의 HTTPS 처리) |
+| **HTTP port** | `80` |
+
+**Default cache behavior 설정:**
+
+| 항목 | 설정값 |
+|---|---|
+| **Viewer protocol policy** | `Redirect HTTP to HTTPS` (HTTP 접속 시 자동으로 HTTPS로 전환) |
+| **Allowed HTTP methods** | `GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE` (API 포함이므로 전체 허용) |
+| **Cache policy** | `CachingDisabled` (동적 API 서버이므로 캐시 비활성화 권장) |
+
+**Settings:**
+
+| 항목 | 설정값 |
+|---|---|
+| **Alternate domain name (CNAME)** | 도메인이 있으면 입력 (예: `cerberus.example.com`), 없으면 빈칸 |
+| **Custom SSL certificate** | 7-1에서 발급한 ACM 인증서 선택 (도메인이 있는 경우) |
+| **Default root object** | `index.html` |
+
+4. **`Create distribution`** 클릭
+5. 배포 상태가 **`Enabled`** 가 되면 완료 (최대 10~15분 소요).
+   **`Distribution domain name`** (예: `d1234abcd.cloudfront.net`) 을 메모합니다.
+
+### 7-3. WAF Web ACL 생성 및 CloudFront에 연결
+
+1. AWS 콘솔 검색창에 **`WAF`** 입력 → WAF & Shield로 이동
+2. 왼쪽 메뉴 **`AWS WAF`** → **`Web ACLs`** → **`Create web ACL`** 클릭
+3. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Resource type** | `Amazon CloudFront distributions` |
+| **Name** | `cerberus-waf` |
+| **Region** | `Global (CloudFront)` (자동 선택됨) |
+
+4. **`Add AWS resources`** 클릭 → 7-2에서 만든 CloudFront 배포 선택 → **`Add`**
+5. **`Next`** 클릭 → **규칙 추가** 화면에서 **`Add rules`** → **`Add managed rule groups`** 클릭
+6. 아래 관리형 규칙을 펼쳐서 각각 **`Add to web ACL`** 토글을 켭니다.
+
+| 규칙 그룹 | 역할 |
+|---|---|
+| `AWS managed rule groups` > **`Core rule set`** | XSS 등 일반적인 웹 공격 차단 |
+| `AWS managed rule groups` > **`SQL database`** | SQL 인젝션 차단 |
+| `AWS managed rule groups` > **`Amazon IP reputation list`** | 악성 IP 평판 기반 차단 |
+
+7. **`Add rules`** 클릭
+8. **`Add rules`** 버튼을 다시 클릭 → **`Add my own rules and rule groups`** 선택
+9. **`Rate-based rule`** 선택 후 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Name** | `rate-limit-per-ip` |
+| **Rate limit** | `1000` (5분간 동일 IP에서 1,000회 이상 요청 차단) |
+| **IP address to use for rate limiting** | `Source IP address` |
+
+10. **`Add rule`** → **`Next`** → **`Next`** → **`Next`** → **`Create web ACL`** 클릭
+
+### 7-4. EC2 보안 그룹 — CloudFront 경유 강제
+
+CloudFront를 거치지 않고 EC2 IP 주소로 직접 접속하는 것을 막습니다.
+
+1. AWS 콘솔에서 **`EC2`** → 왼쪽 메뉴 **`Security Groups`** → `cerberus-server` 에 연결된 보안 그룹 클릭
+2. **`Inbound rules`** 탭 → **`Edit inbound rules`** 클릭
+3. 기존 **HTTP (포트 80)** 규칙을 찾아 **소스(Source)** 를 아래와 같이 변경합니다.
+
+| 유형 | 포트 | 소스 |
+|---|---|---|
+| HTTP | 80 | `Prefix list` → `com.amazonaws.global.cloudfront.origin-facing` 검색 후 선택 |
+
+4. **`Save rules`** 클릭
+
+이제 사용자는 반드시 CloudFront → WAF를 거쳐야 EC2에 접근할 수 있습니다.
+
+> 도메인이 있다면 DNS의 A 레코드(또는 CNAME)를 CloudFront 도메인으로 변경하세요.
+
+---
+
+## STEP 8 — Shield (DDoS 방어)
+
+별도 설정 없이 **자동 적용**됩니다. CloudFront를 도입하면 AWS Shield Standard(무료)가
+네트워크 계층(L3/L4) DDoS 공격을 자동 방어합니다.
+애플리케이션 계층(L7) 공격은 STEP 7의 **WAF rate-based rule** 이 보완합니다.
+
+> Shield Advanced(월 $3,000)는 데모 수준에서는 불필요합니다.
+
+---
+
+## 추가: VPC Flow Logs 설정 (선택)
+
+네트워크 트래픽 기록이 필요하다면 아래 절차로 활성화합니다.
+
+1. AWS 콘솔에서 **`VPC`** 이동 → 왼쪽 메뉴 **`Your VPCs`** → 해당 VPC 선택
+2. 하단 탭 **`Flow logs`** → **`Create flow log`** 클릭
+3. 아래와 같이 설정합니다.
+
+| 항목 | 설정값 |
+|---|---|
+| **Filter** | `All` (수락·거부 트래픽 모두 기록) |
+| **Destination** | `Send to CloudWatch Logs` 권장 |
+| **Log group** | `cerberus-vpc-flow` (새로 생성) |
+| **IAM role** | `New IAM role` 선택 → 자동 생성 이름 그대로 사용 |
+
+4. **`Create flow log`** 클릭
+
+---
+
+## 완료 확인 체크리스트
+
+아래 항목을 모두 확인하면 보안 설정이 완료됩니다.
+
+- [ ] STEP 0: 관리자 기본 비밀번호 `mzcadmin` 변경 완료
+- [ ] STEP 1: DynamoDB 3개 테이블 모두 PITR `Enabled` 상태 확인
+- [ ] STEP 2: GuardDuty 콘솔에서 `Enabled` 상태 확인
+- [ ] STEP 3: Security Hub 콘솔에서 보안 점수 확인
+- [ ] STEP 4: CloudTrail > Trails 목록에 `cerberus-trail` 존재 확인
+- [ ] STEP 5: Inspector 콘솔에서 EC2 인스턴스 스캔 시작 확인
+- [ ] STEP 6: KMS `cerberus-key` 생성, DynamoDB 3개 테이블 암호화 유형이 `AWS owned key` → `Customer managed key` 로 변경됨 확인
+- [ ] STEP 7: CloudFront 배포 `Enabled`, WAF Web ACL 연결 확인, EC2 보안 그룹 HTTP 소스가 CloudFront 프리픽스로 변경됨 확인
+
+---
+
+## 비용 참고
+
+| 서비스 | 데모 수준 예상 비용 |
+|---|---|
+| GuardDuty | 월 $1~5 (트래픽 소량) |
+| Security Hub | 월 $1~3 |
+| CloudTrail | S3 저장 비용 월 $1 내외 |
+| Inspector | 월 $1~3 |
+| KMS (cerberus-key) | 월 $1 (키 1개) |
+| DynamoDB PITR | 월 $0.2/GB (데이터 소량) |
+| CloudFront | 월 $1~5 (트래픽 소량) |
+| WAF | 월 $5~10 (Web ACL + 규칙 기본료) |
+| **합계 (추정)** | **월 $10~30** |
+
+> AWS Budgets에서 월 예산 알림을 설정해 두면 예상치 못한 과금을 방지할 수 있습니다.
+> 콘솔 검색창에 `Budgets` 검색 → `Create budget` → `Monthly cost budget` → 한도 금액 입력.
