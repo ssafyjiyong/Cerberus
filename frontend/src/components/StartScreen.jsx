@@ -3,7 +3,7 @@ import './StartScreen.css';
 import cerberusLogo from '../assets/cerberus_logo.png';
 import gameBackground from '../assets/game_background.png';
 import CreditsModal from './CreditsModal';
-import { useKonamiCode } from '../hooks/useKonamiCode';
+import { useEasterEggTrigger } from '../hooks/useEasterEggTrigger';
 import { useAdminTrigger } from '../hooks/useAdminTrigger';
 
 /**
@@ -11,8 +11,9 @@ import { useAdminTrigger } from '../hooks/useAdminTrigger';
  * 아케이드 스타일의 타이틀 화면으로, 로고와 시작 버튼을 표시합니다.
  *
  * 숨겨진 트리거:
- *  - 코나미 코드(↑↑↓↓←→←→BA) → 제작 크레딧 모달
- *  - 첫 번째 머리 5회 클릭 또는 "admin" 키보드 입력 → 관리자 페이지
+ *  - "easteregg" 키보드 입력                              → 제작 크레딧 모달
+ *  - "admin" 키보드 입력 OR 케르베로스 로고 5회 탭/클릭   → 관리자 페이지
+ *    (둘 중 어느 방식이든 발동되며, 발동 후 비밀번호 모달이 뜹니다)
  */
 export default function StartScreen({
   onStart,
@@ -21,7 +22,7 @@ export default function StartScreen({
   onRequestAdmin,
   adminActive = false,
 }) {
-  const [showCredits, closeCredits] = useKonamiCode();
+  const [showCredits, closeCredits] = useEasterEggTrigger();
   const adminTrigger = useAdminTrigger({ disabled: adminActive });
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export default function StartScreen({
 
       {/* 콘텐츠 */}
       <div className="start-screen__content">
-        {/* 로고 — 첫 번째 머리 영역에 관리자 진입 트리거가 숨겨져 있음 */}
+        {/* 로고 — 전체 영역이 관리자 진입용 5회 탭 트리거 (모바일 친화) */}
         <div className="start-screen__logo-wrap">
           <img
             src={cerberusLogo}
@@ -49,9 +50,9 @@ export default function StartScreen({
           />
           <button
             type="button"
-            className="start-screen__first-head-hit"
+            className="start-screen__logo-hit"
             onClick={adminTrigger.handleHeadClick}
-            aria-label="첫 번째 머리"
+            aria-label="관리자 진입 (5회 탭)"
             tabIndex={-1}
           />
         </div>
@@ -106,7 +107,7 @@ export default function StartScreen({
         </button>
       </div>
 
-      {/* 이스터에그: 코나미 코드(↑↑↓↓←→←→BA) 입력 시 크레딧 노출 */}
+      {/* 이스터에그: "easteregg" 키보드 입력 시 크레딧 노출 */}
       {showCredits && <CreditsModal onClose={closeCredits} />}
     </div>
   );

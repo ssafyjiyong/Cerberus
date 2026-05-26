@@ -69,7 +69,7 @@
   animation: scanline-move 4s linear infinite;
 }
 
-/* Konami unlock badge */
+/* Easter egg unlock badge */
 .credits-modal__badge {
   font-family: var(--font-pixel);
   font-size: clamp(6px, 1.3vw, 9px);

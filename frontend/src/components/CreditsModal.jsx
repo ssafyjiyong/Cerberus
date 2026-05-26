@@ -4,7 +4,7 @@ import './CreditsModal.css';
 /**
  * CreditsModal - 숨겨진 스태프 크레딧 화면 (이스터에그).
  *
- * StartScreen에서 코나미 코드(↑↑↓↓←→←→BA)를 입력하면 노출됩니다.
+ * StartScreen 에서 키보드로 "easteregg" 를 입력하면 노출됩니다.
  * 레트로 아케이드 네온 스타일로 제작 크레딧을 표시합니다.
  *
  * @param {function} onClose - 모달을 닫는 콜백
@@ -35,9 +35,9 @@ export default function CreditsModal({ onClose }) {
         {/* 패널 내부를 가로지르는 스캔라인 */}
         <div className="credits-modal__scanline" />
 
-        {/* 코나미 코드 해제 배지 */}
+        {/* 시크릿 코드 해제 배지 */}
         <div className="credits-modal__badge">
-          ▲ ▲ ▼ ▼ ◀ ▶ ◀ ▶ B A — UNLOCKED
+          E · A · S · T · E · R · E · G · G — UNLOCKED
         </div>
 
         {/* 케르베로스의 세 머리 */}

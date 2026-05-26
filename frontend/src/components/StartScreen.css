@@ -64,19 +64,20 @@
   filter: drop-shadow(0 0 20px rgba(255, 68, 68, 0.6));
 }
 
-/* 첫 번째(왼쪽) 머리 영역 — 보이지 않는 클릭 박스 */
-.start-screen__first-head-hit {
+/* 케르베로스 캐릭터 전체를 덮는 투명 탭 영역 — 모바일 친화 5회 탭 트리거 */
+.start-screen__logo-hit {
   position: absolute;
-  top: 40%;
-  left: 15%;
-  width: 22%;
-  height: 35%;
+  inset: 0;
   background: transparent;
   border: none;
   padding: 0;
-  cursor: default;  /* 클릭 가능함을 드러내지 않음 */
+  cursor: default;  /* 클릭 가능함을 시각적으로 드러내지 않음 */
+  /* 모바일에서 길게 탭 시 텍스트 선택·하이라이트가 뜨는 것을 방지 */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
-.start-screen__first-head-hit:focus {
+.start-screen__logo-hit:focus {
   outline: none;
 }
 
