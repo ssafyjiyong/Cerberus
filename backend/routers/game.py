@@ -63,8 +63,11 @@ router = APIRouter(prefix="/api/game", tags=["게임"])
 )
 async def start_game(request: GameStartRequest | None = None) -> GameStartResponse:
     level = request.level if request else 1
+    exclude_ids = (request.exclude_question_ids if request else None) or []
     try:
-        session = game_service.create_session(level=level)
+        session = game_service.create_session(
+            level=level, exclude_question_ids=exclude_ids,
+        )
         q = session.question or {}
         return GameStartResponse(
             session_id=session.session_id,
@@ -72,6 +75,7 @@ async def start_game(request: GameStartRequest | None = None) -> GameStartRespon
             title=session.title or f"STAGE {level}",
             subtitle=session.subtitle,
             domain=session.subtitle,  # legacy 호환
+            question_id=str(q.get("id", "")),
             isms_control_id=q.get("isms_control_id", ""),
             isms_control_title=q.get("isms_control_title", ""),
             scenario_context=q.get("scenario_context", ""),

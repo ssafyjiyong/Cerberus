@@ -638,10 +638,11 @@ function QuestionEditor({ stage, initial, onCancel, onSaved, showToast }) {
         tier,
         description: '',
         trigger_keywords: [],
+        required_keyword_min: 0,
         exemplar_answer: '',
         ...(tier === 'half'
-          ? { rebuttal: '', acknowledgment_keywords: [] }
-          : { follow_up: '', compensating_keywords: [] }),
+          ? { rebuttal: '', acknowledgment_keywords: [], acknowledgment_min: 0 }
+          : { follow_up: '', compensating_keywords: [], compensating_min: 0 }),
       },
     ]);
   };
@@ -730,6 +731,7 @@ function QuestionEditor({ stage, initial, onCancel, onSaved, showToast }) {
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean),
+        required_keyword_min: Math.max(0, parseInt(p.required_keyword_min || 0, 10) || 0),
         rebuttal: p.rebuttal || '',
         acknowledgment_keywords: Array.isArray(p.acknowledgment_keywords)
           ? p.acknowledgment_keywords
@@ -737,6 +739,7 @@ function QuestionEditor({ stage, initial, onCancel, onSaved, showToast }) {
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean),
+        acknowledgment_min: Math.max(0, parseInt(p.acknowledgment_min || 0, 10) || 0),
         follow_up: p.follow_up || '',
         compensating_keywords: Array.isArray(p.compensating_keywords)
           ? p.compensating_keywords
@@ -744,6 +747,7 @@ function QuestionEditor({ stage, initial, onCancel, onSaved, showToast }) {
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean),
+        compensating_min: Math.max(0, parseInt(p.compensating_min || 0, 10) || 0),
         exemplar_answer: p.exemplar_answer || '',
       })),
     };
@@ -1027,6 +1031,25 @@ function AnswerPathEditor({ path, onChange, onRemove, disabled }) {
         />
       </div>
 
+      <div className="admin-card__row">
+        <label className="admin-card__label">
+          ⚠️ 최소 매칭 키워드 수 (strict) — 0=1개 이상이면 통과 / 1+=명시적 N개 이상 필수
+        </label>
+        <input
+          type="number"
+          min="0"
+          max="20"
+          className="admin-input"
+          value={path.required_keyword_min ?? 0}
+          onChange={(e) =>
+            onChange({
+              required_keyword_min: Math.max(0, parseInt(e.target.value || '0', 10) || 0),
+            })
+          }
+          disabled={disabled}
+        />
+      </div>
+
       {isHalf && (
         <>
           <div className="admin-card__row">
@@ -1058,6 +1081,24 @@ function AnswerPathEditor({ path, onChange, onRemove, disabled }) {
               disabled={disabled}
             />
           </div>
+          <div className="admin-card__row">
+            <label className="admin-card__label">
+              acknowledgment 최소 매칭 수 (0=1개 이상)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="20"
+              className="admin-input"
+              value={path.acknowledgment_min ?? 0}
+              onChange={(e) =>
+                onChange({
+                  acknowledgment_min: Math.max(0, parseInt(e.target.value || '0', 10) || 0),
+                })
+              }
+              disabled={disabled}
+            />
+          </div>
         </>
       )}
 
@@ -1075,7 +1116,7 @@ function AnswerPathEditor({ path, onChange, onRemove, disabled }) {
           </div>
           <div className="admin-card__row">
             <label className="admin-card__label">
-              Compensating Keywords (쉼표) — 모두 충족해야 full 확정
+              Compensating Keywords (쉼표) — 기본은 모두 충족해야 full 확정
             </label>
             <input
               className="admin-input"
@@ -1089,6 +1130,24 @@ function AnswerPathEditor({ path, onChange, onRemove, disabled }) {
                 })
               }
               placeholder="위험평가, 경영진 승인"
+              disabled={disabled}
+            />
+          </div>
+          <div className="admin-card__row">
+            <label className="admin-card__label">
+              compensating 최소 매칭 수 (0=전부 충족 필요 / N=N개 이상)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="20"
+              className="admin-input"
+              value={path.compensating_min ?? 0}
+              onChange={(e) =>
+                onChange({
+                  compensating_min: Math.max(0, parseInt(e.target.value || '0', 10) || 0),
+                })
+              }
               disabled={disabled}
             />
           </div>

@@ -121,6 +121,9 @@ def log_chat_interaction(
     missing_criteria: Optional[list[int]] = None,
     is_level_clear: bool = False,
     is_game_clear: bool = False,
+    isms_control_id: str = "",
+    question_id: str = "",
+    matched_path_id: str = "",
 ) -> None:
     """
     개별 채팅 상호작용을 기록합니다.
@@ -153,6 +156,9 @@ def log_chat_interaction(
         "time_used": round(time_used, 2),
         "is_level_clear": is_level_clear,
         "is_game_clear": is_game_clear,
+        "isms_control_id": isms_control_id or "",
+        "question_id": question_id or "",
+        "matched_path_id": matched_path_id or "",
         "created_at": now_kst_iso(),
     }
 

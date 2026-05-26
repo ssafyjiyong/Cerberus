@@ -69,7 +69,8 @@ export default function App() {
     game.setIsLoading(true);
     setError(null);
     try {
-      const response = await apiStartGame(1);
+      // 새 게임 시작 — 출제 이력 없음
+      const response = await apiStartGame(1, []);
       game.beginStage(1, response);
       timer.reset(response.time_limit);
       timer.start();
@@ -118,7 +119,8 @@ export default function App() {
 
     const t = setTimeout(async () => {
       try {
-        const response = await apiStartGame(nextLevel);
+        // 같은 게임 안에서 이미 출제된 질문은 제외 (전체 풀 랜덤 + 중복 방지)
+        const response = await apiStartGame(nextLevel, game.usedQuestionIds || []);
         game.beginStage(nextLevel, response);
         timer.reset(response.time_limit);
         timer.start();

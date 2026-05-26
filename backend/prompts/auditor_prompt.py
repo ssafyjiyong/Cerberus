@@ -38,7 +38,7 @@ from typing import Any
 # System Prompt 템플릿
 # ──────────────────────────────────────────────
 SYSTEM_PROMPT_TEMPLATE = """당신은 ISMS-P(정보보호 및 개인정보보호 관리체계) 인증 심사원 '케르베로스'입니다.
-실제 인증심사의 엄격한 기준으로 피심사자(게임 플레이어)의 답변을 평가합니다.
+실제 인증심사의 매우 엄격한 기준으로 피심사자(게임 플레이어)의 답변을 평가합니다.
 
 ## 근거 ISMS-P 항목
 {isms_control_id} {isms_control_title}
@@ -51,24 +51,39 @@ SYSTEM_PROMPT_TEMPLATE = """당신은 ISMS-P(정보보호 및 개인정보보호
 
 ## 채점 규칙 — 답변 경로(answer paths)
 플레이어의 답변은 아래 정의된 경로 중 하나로만 분류되며, 그 외에는 **모두 불합격(fail)** 입니다.
-키워드는 "정확히 그 단어가 등장해야" 인정되는 것이 아니라, **명백히 같은 개념**이 답변에 드러나야 인정됩니다.
-모호한 일반론·근거 없는 단정·예시 없는 추상적 답변은 절대 인정하지 마십시오.
+
+### ⚠️ 키워드 매칭 — 절대 엄격 규칙
+1. 키워드 매칭은 **명시적 문자열 등장** 기준입니다. 비슷한 개념·동의어·의역은 절대 인정하지 마십시오.
+2. 매칭으로 인정된 키워드는 반드시 `matched_keywords` 배열에 **사용자 답변에 등장한 형태 그대로** 보고하십시오.
+   서버에서 사용자 누적 대화 텍스트를 substring 으로 재검증하므로, 환각으로 보고된 키워드는 즉시 자동 거부됩니다.
+3. 각 경로의 `required_keyword_min` 만큼 trigger_keywords 가 매칭되어야 합니다.
+   (0 이면 1개 이상이면 충분. 양수면 그 수 이상 명시적 매칭 필수)
+4. 모호한 일반론·근거 없는 의지표현("하겠습니다", "검토 중입니다")만으로는 절대 통과시키지 마십시오.
+5. AI 가 키워드를 환각으로 만들어내거나 보수적이지 않게 판단하면, 그 답변은 통과로 인정되지 않습니다.
 
 {answer_paths_block}
 
-## 절대 규칙
-- 답변이 위 경로 중 어떤 것에도 해당하지 않으면 tier="fail" 로 평가하고, 직접 정답을 알려주지 마십시오.
-  대신 시나리오 맥락에서 더 구체적인 근거·통제·증적이 필요하다는 점을 한국어로 짧게 지적해 주십시오.
-  (참고 멘트: "{default_rebuttal}")
-- half 경로의 경우: 플레이어의 **이번 답변**이 trigger_keywords 에 해당하지만 아직 acknowledgment_keywords
-  가 보이지 않으면 tier="fail" 로 두고, message 에 rebuttal 을 그대로 또는 비슷한 톤으로 던져 후속
-  답변을 유도하십시오. 같은 세션의 **누적 대화**에서 trigger 와 acknowledgment 가 모두 나타났다면
-  tier="half" 로 판정하십시오.
-- full 경로도 동일: trigger_keywords 만 나오고 compensating_keywords 가 안 보이면 tier="fail" 로 두고
-  follow_up 을 던지십시오. 누적 대화에서 trigger 와 compensating 이 모두 나타났다면 tier="full".
-- 한 답변에 full 의 trigger + compensating 이 한 번에 등장하면 즉시 tier="full".
-- half 와 full 경로가 동시에 만족되면 더 높은 tier(full)를 채택합니다.
+## 통과 판정 로직 (반드시 이 순서로 평가)
+1. 사용자의 **누적 대화 전체**(이번 답변 포함)에서 어떤 키워드가 명시적으로 등장했는지 식별합니다.
+2. 각 경로의 trigger_keywords 매칭 개수가 `required_keyword_min` 이상인지 확인 (0이면 1 이상).
+3. **full 경로** 조건: 위 (2)를 만족 + compensating_keywords 가 `compensating_min` 이상(0이면 전체) 매칭.
+   - 이 조건을 만족하면 tier="full".
+4. **half 경로** 조건: 위 (2)를 만족 + acknowledgment_keywords 가 `acknowledgment_min` 이상(0이면 1 이상) 매칭.
+   - 이 조건을 만족하면 tier="half".
+5. trigger 는 충족했지만 compensating/acknowledgment 가 미충족이면:
+   - tier="fail" 로 두고, message 에 해당 경로의 follow_up/rebuttal 을 던져 후속 답변을 유도하십시오.
+   - 이 시점에서는 절대 통과시키지 마십시오. 사용자가 보완통제·수용 의사를 키워드로 명시한 후에만 통과.
+6. 어떤 경로의 trigger 도 매칭 임계치 미만이면:
+   - tier="fail", message 는 default_rebuttal 톤으로 더 구체적 근거를 요구.
+   - (참고 멘트: "{default_rebuttal}")
+
+## 평가 우선순위
+- full 과 half 가 동시에 충족되면 더 높은 tier=full.
+- 한 답변에 full 의 모든 조건이 한 번에 등장하면 즉시 tier="full".
+
+## 출력 규칙
 - 반드시 한국어로 응답하십시오. 평가 결과는 반드시 `evaluate_answer` 도구로 반환하십시오.
+- `matched_keywords` 에 사용자 답변에서 **명시적으로 등장한 키워드만** 담으십시오. 추정·보완은 금물.
 - message 는 심사원의 톤(차분·공식·약간 강한 어조)을 유지하고 2~4문장 이내로 작성하십시오.
 """
 
@@ -81,26 +96,36 @@ def _render_answer_paths_block(answer_paths: list[dict]) -> str:
         pid = path.get("id", f"path-{idx}")
         desc = path.get("description", "")
         triggers = path.get("trigger_keywords") or []
+        req_min = int(path.get("required_keyword_min") or 0)
+        req_label = f"{req_min}개 이상 필수" if req_min > 0 else "1개 이상이면 충분"
+
         lines.append(
             f"### 경로 {idx} — id=\"{pid}\" / tier={tier}\n"
             f"- 설명: {desc}"
         )
         if triggers:
-            lines.append(f"- trigger_keywords: {triggers}")
+            lines.append(f"- trigger_keywords ({req_label}): {triggers}")
         if tier == "half":
             ack = path.get("acknowledgment_keywords") or []
+            ack_min = int(path.get("acknowledgment_min") or 0)
+            ack_label = f"{ack_min}개 이상" if ack_min > 0 else "1개 이상"
             rebuttal = path.get("rebuttal", "")
             if rebuttal:
                 lines.append(f"- rebuttal(반박 멘트): \"{rebuttal}\"")
             if ack:
-                lines.append(f"- acknowledgment_keywords(수용 키워드, 1개 이상): {ack}")
+                lines.append(f"- acknowledgment_keywords({ack_label} 충족): {ack}")
         if tier == "full":
             comp = path.get("compensating_keywords") or []
+            comp_min = int(path.get("compensating_min") or 0)
+            comp_label = (
+                f"{comp_min}개 이상" if comp_min > 0
+                else "**전부 모두 충족**"
+            )
             follow_up = path.get("follow_up", "")
             if follow_up:
                 lines.append(f"- follow_up(후속 질문): \"{follow_up}\"")
             if comp:
-                lines.append(f"- compensating_keywords(보완통제, 모두 충족): {comp}")
+                lines.append(f"- compensating_keywords({comp_label}): {comp}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -131,27 +156,46 @@ def normalize_tier(value: object) -> str:
     return "fail"
 
 
+def _safe_nonneg_int(value: object, default: int = 0) -> int:
+    """음수가 아닌 정수로 변환. 실패 시 default."""
+    try:
+        v = int(value)
+        return v if v >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def normalize_answer_path(raw: dict) -> dict:
     """answer_path 한 건을 표준 형태로 정규화."""
     tier = normalize_tier(raw.get("tier"))
+    triggers = [str(k).strip() for k in (raw.get("trigger_keywords") or []) if str(k).strip()]
+
     out: dict[str, Any] = {
         "id": str(raw.get("id") or "").strip() or f"path-{tier}",
         "tier": tier,
         "description": str(raw.get("description") or "").strip(),
-        "trigger_keywords": [str(k).strip() for k in (raw.get("trigger_keywords") or []) if str(k).strip()],
+        "trigger_keywords": triggers,
         # 모범답안 — 단계 종료 후 학습용으로 노출되는 "이렇게 답하면 통과" 한 줄.
         "exemplar_answer": str(raw.get("exemplar_answer") or "").strip(),
+        # ── 엄격 검증 필드 ──
+        # trigger_keywords 중 사용자 누적 대화에서 명시적으로 등장해야 하는 **최소 개수**.
+        # 0 이면 "1개 이상이면 통과"로 관대 해석. 양수면 그 이상 매칭되어야 통과.
+        "required_keyword_min": _safe_nonneg_int(raw.get("required_keyword_min"), 0),
     }
     if tier == "half":
         out["rebuttal"] = str(raw.get("rebuttal") or "").strip()
         out["acknowledgment_keywords"] = [
             str(k).strip() for k in (raw.get("acknowledgment_keywords") or []) if str(k).strip()
         ]
+        # acknowledgment 키워드 중 최소 매칭 개수. 0=1개 이상.
+        out["acknowledgment_min"] = _safe_nonneg_int(raw.get("acknowledgment_min"), 0)
     elif tier == "full":
         out["follow_up"] = str(raw.get("follow_up") or "").strip()
         out["compensating_keywords"] = [
             str(k).strip() for k in (raw.get("compensating_keywords") or []) if str(k).strip()
         ]
+        # compensating 키워드 중 최소 매칭 개수. 0 또는 None=목록 전체 충족 필요(기본 엄격).
+        out["compensating_min"] = _safe_nonneg_int(raw.get("compensating_min"), 0)
     return out
 
 

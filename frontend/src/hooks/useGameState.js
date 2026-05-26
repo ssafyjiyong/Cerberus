@@ -48,6 +48,10 @@ export function useGameState() {
   // 각 원소: { level, session_id, score, tier, time_used, prompt_count, isms_control_id }
   const [clearedStages, setClearedStages] = useState([]);
 
+  // 같은 게임 안에서 이미 출제된 질문 ID — 다음 단계 /start 호출 시 exclude 로 전달
+  const [usedQuestionIds, setUsedQuestionIds] = useState([]);
+  const [currentQuestionId, setCurrentQuestionId] = useState(null);
+
   const [isLoading, setIsLoading] = useState(false);
 
   /**
@@ -65,6 +69,12 @@ export function useGameState() {
     setIsmsControlId(sessionData.isms_control_id || '');
     setIsmsControlTitle(sessionData.isms_control_title || '');
     setScenarioContext(sessionData.scenario_context || '');
+    // 출제된 질문 ID 추적
+    const qid = sessionData.question_id || '';
+    setCurrentQuestionId(qid || null);
+    if (qid) {
+      setUsedQuestionIds((prev) => (prev.includes(qid) ? prev : [...prev, qid]));
+    }
     setGameState('playing');
 
     const initialMessages = [
@@ -113,6 +123,8 @@ export function useGameState() {
     setIsmsControlId('');
     setIsmsControlTitle('');
     setScenarioContext('');
+    setUsedQuestionIds([]);
+    setCurrentQuestionId(null);
   }, []);
 
   const addUserMessage = useCallback((text) => {
@@ -211,6 +223,8 @@ export function useGameState() {
     setIsmsControlTitle('');
     setScenarioContext('');
     setClearedStages([]);
+    setUsedQuestionIds([]);
+    setCurrentQuestionId(null);
     setIsLoading(false);
   }, []);
 
@@ -248,6 +262,8 @@ export function useGameState() {
     totalScore,
     totalTimeUsed,
     totalPromptCount,
+    usedQuestionIds,
+    currentQuestionId,
 
     // 표시 메타
     stageInfo: STAGES[stage],

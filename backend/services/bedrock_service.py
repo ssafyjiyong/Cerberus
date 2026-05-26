@@ -49,7 +49,8 @@ EVALUATE_ANSWER_TOOL: dict[str, Any] = {
         "name": "evaluate_answer",
         "description": (
             "피심사자의 답변을 시나리오 기반 answer_paths 에 따라 평가하고 결과를 "
-            "구조화 JSON 으로 반환합니다."
+            "구조화 JSON 으로 반환합니다. matched_keywords 는 서버에서 재검증되므로 "
+            "사용자 답변에 명시적으로 등장한 키워드만 보고하십시오."
         ),
         "inputSchema": {
             "json": {
@@ -69,6 +70,16 @@ EVALUATE_ANSWER_TOOL: dict[str, Any] = {
                             "fail 일 때는 빈 문자열 또는 가장 근접했던 path id."
                         ),
                     },
+                    "matched_keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "사용자 누적 대화에서 **명시적으로 등장한** 키워드 목록. "
+                            "trigger / compensating / acknowledgment 어느 카테고리이든 모두 포함. "
+                            "서버가 substring 으로 재검증하므로, 등장하지 않은 키워드를 보고하면 "
+                            "통과가 자동 거부됩니다."
+                        ),
+                    },
                     "message": {
                         "type": "string",
                         "description": (
@@ -86,7 +97,10 @@ EVALUATE_ANSWER_TOOL: dict[str, Any] = {
                         ),
                     },
                 },
-                "required": ["tier", "matched_path_id", "message", "missing_aspects"],
+                "required": [
+                    "tier", "matched_path_id", "matched_keywords",
+                    "message", "missing_aspects",
+                ],
             }
         },
     }
@@ -146,13 +160,14 @@ def evaluate_answer(question: dict, conversation_history: list[dict]) -> dict:
         )
         parsed = _parse_tool_use_response(response)
 
-        # ── 후처리 검증: matched_path_id 가 실제 정의된 경로인지 확인 ──
-        valid_path_ids = {p["id"] for p in question.get("answer_paths", [])}
+        # ── 후처리 검증 1: matched_path_id 가 실제 정의된 경로인지 확인 ──
+        paths_by_id = {p["id"]: p for p in question.get("answer_paths", [])}
         tier = normalize_tier(parsed.get("tier"))
         matched_id = str(parsed.get("matched_path_id") or "").strip()
 
         if tier in ("full", "half"):
-            if matched_id not in valid_path_ids:
+            target_path = paths_by_id.get(matched_id)
+            if target_path is None:
                 logger.warning(
                     "AI가 보고한 matched_path_id '%s' 가 정의된 경로에 없음 → fail 처리",
                     matched_id,
@@ -160,18 +175,42 @@ def evaluate_answer(question: dict, conversation_history: list[dict]) -> dict:
                 tier = "fail"
                 matched_id = ""
             else:
-                # 경로 tier 와 보고된 tier 가 일치하는지 검증 (downgrade 만 허용)
-                target_path = next(
-                    (p for p in question["answer_paths"] if p["id"] == matched_id), None
+                path_tier = normalize_tier(target_path.get("tier"))
+                # 정의된 path tier 보다 더 높게 보고됐다면 강등 (full path → half 보고는 OK)
+                if path_tier == "half" and tier == "full":
+                    tier = "half"
+                if path_tier == "fail":
+                    tier = "fail"
+
+                # ── 후처리 검증 2: 실제 키워드 매칭을 substring 으로 재검증 ──
+                user_text = _aggregate_user_text(conversation_history)
+                ai_reported = parsed.get("matched_keywords") or []
+                if not isinstance(ai_reported, list):
+                    ai_reported = []
+                # AI 보고 키워드 중 실제 사용자 텍스트에 등장한 것만 인정
+                verified = _verify_keywords_in_text(
+                    [str(k) for k in ai_reported], user_text
                 )
-                if target_path:
-                    path_tier = normalize_tier(target_path.get("tier"))
-                    # full 경로 → half 보고는 이상하지만 그대로 두고,
-                    # half 경로 → full 보고는 path 정의를 신뢰하여 half 로 강등.
-                    if path_tier == "half" and tier == "full":
-                        tier = "half"
-                    if path_tier == "fail":
-                        tier = "fail"
+
+                # path 정의에 따른 strict 검증
+                check = _strict_path_match(target_path, user_text, verified)
+                parsed["matched_keywords"] = check["matched"]
+
+                if not check["passed"]:
+                    logger.info(
+                        "Strict 키워드 검증 실패 (path=%s): %s → 다운그레이드 %s → %s",
+                        matched_id, check["reason"], tier, check["downgrade_to"],
+                    )
+                    tier = check["downgrade_to"]
+                    if tier == "fail":
+                        matched_id = ""
+                        # AI 가 통과 메시지를 던졌더라도 message 톤만 조정해야 하지만
+                        # 환각 방지를 위해 missing_aspects 에 검증 실패 사유를 명시.
+                        existing_missing = parsed.get("missing_aspects") or []
+                        if not isinstance(existing_missing, list):
+                            existing_missing = []
+                        existing_missing.append(check["reason"])
+                        parsed["missing_aspects"] = existing_missing
 
         parsed["tier"] = tier
         parsed["matched_path_id"] = matched_id
@@ -184,6 +223,148 @@ def evaluate_answer(question: dict, conversation_history: list[dict]) -> dict:
         error_msg = exc.response["Error"]["Message"]
         logger.error("Bedrock API 호출 실패 [%s]: %s", error_code, error_msg)
         raise RuntimeError(f"Bedrock API 오류: {error_code} - {error_msg}") from exc
+
+
+# ──────────────────────────────────────────────
+# 키워드 매칭 검증 — 서버측 fact-check
+# ──────────────────────────────────────────────
+def _normalize_for_match(text: str) -> str:
+    """대소문자·공백 무관 substring 매칭을 위한 정규화."""
+    if not isinstance(text, str):
+        return ""
+    # 한국어는 띄어쓰기 변형이 잦으므로 공백을 제거하고 비교
+    return "".join(text.lower().split())
+
+
+def _aggregate_user_text(conversation_history: list[dict]) -> str:
+    """대화 이력에서 사용자 발화만 합쳐 하나의 텍스트로."""
+    parts: list[str] = []
+    for entry in conversation_history or []:
+        if (entry or {}).get("role") == "user":
+            content = (entry or {}).get("content", "")
+            if isinstance(content, str):
+                parts.append(content)
+    return "\n".join(parts)
+
+
+def _verify_keywords_in_text(keywords: list[str], user_text: str) -> list[str]:
+    """AI 가 보고한 키워드 중 실제 user_text 에 substring 으로 존재하는 것만 반환."""
+    haystack = _normalize_for_match(user_text)
+    verified: list[str] = []
+    seen: set[str] = set()
+    for kw in keywords:
+        if not isinstance(kw, str):
+            continue
+        norm_kw = _normalize_for_match(kw)
+        if not norm_kw or norm_kw in seen:
+            continue
+        if norm_kw in haystack:
+            verified.append(kw.strip())
+            seen.add(norm_kw)
+    return verified
+
+
+def _count_keyword_matches(keywords: list[str], user_text: str) -> tuple[int, list[str]]:
+    """user_text 에서 매칭된 키워드 개수와 매칭된 키워드 목록을 반환."""
+    matched = _verify_keywords_in_text(keywords or [], user_text)
+    return len(matched), matched
+
+
+def _strict_path_match(path: dict, user_text: str, ai_matched: list[str]) -> dict:
+    """
+    answer_path 정의에 따라 사용자 누적 대화가 strict 조건을 충족하는지 검증.
+
+    반환:
+        {
+            "passed": bool,
+            "matched": [확정된 매칭 키워드들],
+            "reason": str (실패 시 사유),
+            "downgrade_to": "fail" | "half" — 실패 시 강등할 tier
+        }
+    """
+    tier = path.get("tier", "fail")
+    triggers = path.get("trigger_keywords") or []
+    trigger_min = int(path.get("required_keyword_min") or 0) or 1  # 0이면 1로 해석
+
+    # 1) trigger 매칭 검증
+    trigger_count, trigger_matched = _count_keyword_matches(triggers, user_text)
+    if trigger_count < trigger_min:
+        return {
+            "passed": False,
+            "matched": _dedupe_strs(ai_matched + trigger_matched),
+            "reason": (
+                f"trigger_keywords 매칭 {trigger_count}/{trigger_min} 미달 — "
+                f"명시적 키워드가 부족합니다."
+            ),
+            "downgrade_to": "fail",
+        }
+
+    # 2) tier 별 보완 조건
+    if tier == "full":
+        comps = path.get("compensating_keywords") or []
+        comp_min = int(path.get("compensating_min") or 0)
+        if comp_min <= 0:
+            comp_min = len(comps)  # 0=전체 충족
+        comp_count, comp_matched = _count_keyword_matches(comps, user_text)
+        if comp_count < comp_min:
+            return {
+                "passed": False,
+                "matched": _dedupe_strs(trigger_matched + comp_matched + ai_matched),
+                "reason": (
+                    f"보완통제(compensating) {comp_count}/{comp_min} 미달 — "
+                    f"trigger 는 충족했으나 보완 키워드가 부족합니다."
+                ),
+                # 사용자가 trigger 는 줬으므로 half 로도 떨어뜨릴 수 있지만,
+                # 풀스코어 통과는 막아야 하므로 fail 로 두고 후속 답변(follow_up)을 유도.
+                "downgrade_to": "fail",
+            }
+        return {
+            "passed": True,
+            "matched": _dedupe_strs(trigger_matched + comp_matched),
+            "reason": "",
+            "downgrade_to": "full",
+        }
+
+    if tier == "half":
+        acks = path.get("acknowledgment_keywords") or []
+        ack_min = int(path.get("acknowledgment_min") or 0) or 1  # 0=1
+        ack_count, ack_matched = _count_keyword_matches(acks, user_text)
+        if ack_count < ack_min:
+            return {
+                "passed": False,
+                "matched": _dedupe_strs(trigger_matched + ack_matched + ai_matched),
+                "reason": (
+                    f"수용(acknowledgment) {ack_count}/{ack_min} 미달 — "
+                    f"trigger 는 충족했으나 수용 의사 키워드가 부족합니다."
+                ),
+                "downgrade_to": "fail",
+            }
+        return {
+            "passed": True,
+            "matched": _dedupe_strs(trigger_matched + ack_matched),
+            "reason": "",
+            "downgrade_to": "half",
+        }
+
+    return {
+        "passed": False,
+        "matched": _dedupe_strs(ai_matched),
+        "reason": "정의되지 않은 tier 입니다.",
+        "downgrade_to": "fail",
+    }
+
+
+def _dedupe_strs(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in items or []:
+        if not isinstance(s, str):
+            continue
+        key = _normalize_for_match(s)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s.strip())
+    return out
 
 
 def _parse_tool_use_response(response: dict) -> dict:
@@ -201,9 +382,14 @@ def _parse_tool_use_response(response: dict) -> dict:
                 matched_id = str(tool_input.get("matched_path_id") or "").strip()
                 missing_raw = tool_input.get("missing_aspects") or []
                 missing = [str(x).strip() for x in missing_raw if str(x).strip()]
+                matched_kw_raw = tool_input.get("matched_keywords") or []
+                matched_keywords = [
+                    str(x).strip() for x in matched_kw_raw if str(x).strip()
+                ]
                 return {
                     "tier": tier,
                     "matched_path_id": matched_id,
+                    "matched_keywords": matched_keywords,
                     "message": msg,
                     "missing_aspects": missing,
                 }
@@ -227,6 +413,7 @@ def _parse_tool_use_response(response: dict) -> dict:
                     return {
                         "tier": "fail",
                         "matched_path_id": "",
+                        "matched_keywords": [],
                         "message": text,
                         "missing_aspects": [],
                     }
@@ -235,6 +422,7 @@ def _parse_tool_use_response(response: dict) -> dict:
         return {
             "tier": "fail",
             "matched_path_id": "",
+            "matched_keywords": [],
             "message": "심사원의 응답을 처리할 수 없습니다. 다시 시도해 주세요.",
             "missing_aspects": [],
         }
@@ -244,6 +432,7 @@ def _parse_tool_use_response(response: dict) -> dict:
         return {
             "tier": "fail",
             "matched_path_id": "",
+            "matched_keywords": [],
             "message": "응답 처리 중 오류가 발생했습니다. 다시 시도해 주세요.",
             "missing_aspects": [],
         }

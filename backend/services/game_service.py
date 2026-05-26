@@ -80,11 +80,15 @@ class GameSession:
 _sessions: dict[str, GameSession] = {}
 
 
-def create_session(level: int = 1) -> GameSession:
+def create_session(
+    level: int = 1,
+    exclude_question_ids: Optional[list[str]] = None,
+) -> GameSession:
     """
     새로운 게임 세션을 생성합니다 (단일 단계용).
 
-    질문 풀에서 무작위로 1문제가 선택되어 세션 시작 시점에 스냅샷됩니다.
+    질문은 **전체 풀에서 랜덤 추출**됩니다 (카테고리 필터 없음).
+    exclude_question_ids 에 이전 단계에서 출제된 질문 ID 를 전달하면 중복을 피합니다.
 
     Raises:
         RuntimeError("MAINTENANCE_MODE"): 관리자가 유지보수 모드를 켠 상태일 때.
@@ -95,7 +99,9 @@ def create_session(level: int = 1) -> GameSession:
     if level not in (1, 2, 3):
         raise ValueError(f"유효하지 않은 레벨입니다: {level}")
 
-    runtime = config_service.get_effective_stage_runtime(level)
+    runtime = config_service.get_effective_stage_runtime(
+        level, exclude_question_ids=exclude_question_ids
+    )
     params = config_service.get_game_params()
 
     session_id = str(uuid.uuid4())
@@ -252,9 +258,12 @@ def process_chat(session_id: str, message: str) -> ChatResponse:
             prompt_count=session.prompt_count,
             time_used=session.time_used,
             level_attempt=session.prompt_count,
-            missing_criteria=[],  # 통과이므로 누락 없음
+            missing_criteria=[],
             is_level_clear=True,
             is_game_clear=(session.level == 3 and tier == "full"),
+            isms_control_id=(session.question or {}).get("isms_control_id", ""),
+            question_id=(session.question or {}).get("id", ""),
+            matched_path_id=matched_id,
         )
         analytics_service.log_game_session_summary(
             session_id=session.session_id,
@@ -297,9 +306,12 @@ def process_chat(session_id: str, message: str) -> ChatResponse:
         prompt_count=session.prompt_count,
         time_used=session.time_used,
         level_attempt=session.prompt_count,
-        missing_criteria=[],  # legacy 필드 — 새 모델에선 missing_aspects 사용
+        missing_criteria=[],
         is_level_clear=False,
         is_game_clear=False,
+        isms_control_id=(session.question or {}).get("isms_control_id", ""),
+        question_id=(session.question or {}).get("id", ""),
+        matched_path_id=matched_id,
     )
 
     return ChatResponse(

@@ -51,10 +51,13 @@ async function apiRequest(endpoint, options = {}) {
  *   domain: string,
  * }>}
  */
-export async function startGame(level = 1) {
+export async function startGame(level = 1, excludeQuestionIds = []) {
   return apiRequest('/api/game/start', {
     method: 'POST',
-    body: JSON.stringify({ level }),
+    body: JSON.stringify({
+      level,
+      exclude_question_ids: excludeQuestionIds,
+    }),
   });
 }
 

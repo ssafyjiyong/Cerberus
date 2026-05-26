@@ -72,10 +72,22 @@ class AnswerPathPayload(BaseModel):
     tier: str = Field(..., description="full | half | fail")
     description: Optional[str] = ""
     trigger_keywords: Optional[list[str]] = Field(default_factory=list)
+    required_keyword_min: Optional[int] = Field(
+        default=0, ge=0, le=20,
+        description="trigger_keywords 중 최소 매칭 개수 (0=1개 이상이면 통과).",
+    )
     rebuttal: Optional[str] = ""
     acknowledgment_keywords: Optional[list[str]] = Field(default_factory=list)
+    acknowledgment_min: Optional[int] = Field(
+        default=0, ge=0, le=20,
+        description="half 경로의 acknowledgment 최소 매칭 개수 (0=1).",
+    )
     follow_up: Optional[str] = ""
     compensating_keywords: Optional[list[str]] = Field(default_factory=list)
+    compensating_min: Optional[int] = Field(
+        default=0, ge=0, le=20,
+        description="full 경로의 compensating 최소 매칭 개수 (0=전체 충족 필요).",
+    )
     exemplar_answer: Optional[str] = ""
 
 

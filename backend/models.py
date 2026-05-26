@@ -19,6 +19,13 @@ class GameStartRequest(BaseModel):
     """게임 시작 요청 모델 — 각 단계가 독립 세션이므로 어느 단계를 시작할지 지정."""
 
     level: int = Field(default=1, ge=1, le=3, description="시작할 레벨 (1~3)")
+    exclude_question_ids: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "같은 게임 안에서 이미 출제된 질문 ID 목록. "
+            "전체 풀 랜덤 출제 시 중복 방지를 위해 클라이언트가 누적해서 전달합니다."
+        ),
+    )
 
 
 class GameStartResponse(BaseModel):
@@ -30,6 +37,7 @@ class GameStartResponse(BaseModel):
     subtitle: str = Field(default="", description="이 단계의 부제(영역 설명)")
 
     # 출제된 ISMS-P 시나리오 질문
+    question_id: str = Field(default="", description="출제된 질문의 고유 ID (중복 방지용)")
     isms_control_id: str = Field(default="", description="근거 ISMS-P 항목 ID (예: 2.6.2)")
     isms_control_title: str = Field(default="", description="ISMS-P 항목 이름")
     scenario_context: str = Field(default="", description="시나리오 컨텍스트 (왜 지적되었는지)")

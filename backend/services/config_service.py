@@ -410,20 +410,53 @@ def get_all_stage_configs() -> dict[int, dict[str, Any]]:
     return out
 
 
-def pick_random_question(stage: int) -> dict[str, Any]:
-    """스테이지 풀에서 무작위로 질문 1건을 선택."""
-    stage_cfg = get_stage_config(stage)
-    questions = stage_cfg.get("questions") or []
-    if not questions:
-        questions = get_default_questions(stage)
-    # secrets 가 아닌 random — 분포 무작위면 충분.
-    return random.choice(questions)
+def get_all_questions_combined() -> list[dict[str, Any]]:
+    """
+    모든 스테이지의 풀을 하나의 리스트로 합쳐 반환.
+
+    출제 전략(v2.1): 스테이지별 카테고리 구분 없이 **전체 풀에서 랜덤 출제**.
+    카테고리(1.x / 2.x / 3.x)는 관리·등록 편의를 위한 그룹일 뿐이며 게임 진행에는
+    영향을 주지 않습니다.
+    """
+    all_qs: list[dict[str, Any]] = []
+    for stage in ALLOWED_STAGES:
+        all_qs.extend(get_stage_config(stage).get("questions") or [])
+    return all_qs
 
 
-def get_effective_stage_runtime(stage: int) -> dict[str, Any]:
+def pick_random_question(stage: int, exclude_ids: Optional[list[str]] = None) -> dict[str, Any]:
+    """
+    전체 풀(스테이지 무관)에서 무작위로 질문 1건을 선택합니다.
+
+    Args:
+        stage: 호환성을 위해 받지만 더 이상 카테고리 필터로 쓰지 않습니다.
+        exclude_ids: 이미 같은 게임에서 출제된 질문 ID — 중복 방지용으로 제외.
+
+    동일 게임 안에서 Stage 1·2·3 가 같은 질문을 받지 않도록 호출자는
+    이전 단계 질문 ID 들을 exclude_ids 로 전달해야 합니다.
+    """
+    excluded = {str(x) for x in (exclude_ids or []) if x}
+    pool = [q for q in get_all_questions_combined() if str(q.get("id", "")) not in excluded]
+
+    # 풀이 다 소진된 극단적 경우엔 exclude 를 무시하고 전체에서 다시 뽑음
+    if not pool:
+        pool = get_all_questions_combined()
+    if not pool:
+        # 그래도 비어있으면 기본 시드로 폴백
+        pool = []
+        for s in ALLOWED_STAGES:
+            pool.extend(get_default_questions(s))
+    return random.choice(pool)
+
+
+def get_effective_stage_runtime(
+    stage: int, exclude_question_ids: Optional[list[str]] = None
+) -> dict[str, Any]:
     """
     런타임에 실제 적용될 스테이지 파라미터 (time_limit, p_max, base_score) + 무작위 질문.
-    단계별 값이 0/누락이면 전역 game_params 의 값을 폴백으로 사용합니다.
+
+    질문은 **전체 풀에서 랜덤 추출**합니다 (카테고리 필터 없음).
+    exclude_question_ids 로 같은 게임에서 이미 출제된 질문을 제외할 수 있습니다.
     """
     stage_cfg = get_stage_config(stage)
     params = get_game_params()
@@ -435,7 +468,7 @@ def get_effective_stage_runtime(stage: int) -> dict[str, Any]:
         "base_score": int(stage_cfg.get("base_score") or 1000),
         "title": stage_cfg.get("title", f"Stage {stage}"),
         "subtitle": stage_cfg.get("subtitle", ""),
-        "question": pick_random_question(stage),
+        "question": pick_random_question(stage, exclude_ids=exclude_question_ids),
     }
 
 
