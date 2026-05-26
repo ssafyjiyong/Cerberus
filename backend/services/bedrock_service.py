@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 import boto3
@@ -228,12 +229,38 @@ def evaluate_answer(question: dict, conversation_history: list[dict]) -> dict:
 # ──────────────────────────────────────────────
 # 키워드 매칭 검증 — 서버측 fact-check
 # ──────────────────────────────────────────────
+
+# 한국어 조사·어미 — 키워드 매칭 정규화에서 제거.
+# "경영진에게 보고" 와 "경영진 보고" 가 동등 매칭되도록 양쪽 텍스트에 동일 적용합니다.
+# 긴 표현이 먼저 매칭되도록 길이 내림차순으로 alternation 구성합니다.
+_KOREAN_PARTICLES = [
+    "에서는", "에서도", "으로부터", "에게서", "에게는", "에게도", "에게",
+    "으로의", "으로", "에는", "에도", "에서",
+    "와의", "과의", "와는", "과는", "와도", "과도",
+    "이라는", "이라고", "라는", "라고",
+    "께서는", "께서", "께",
+    "에", "의", "을", "를", "이", "가", "은", "는",
+    "와", "과", "도", "만", "나", "며",
+    "입니다", "습니다", "합니다", "됩니다",
+]
+_PARTICLE_PATTERN = re.compile(
+    "(" + "|".join(sorted(_KOREAN_PARTICLES, key=len, reverse=True)) + ")"
+)
+
+
 def _normalize_for_match(text: str) -> str:
-    """대소문자·공백 무관 substring 매칭을 위한 정규화."""
+    """
+    대소문자·공백·한국어 조사 무관 substring 매칭을 위한 정규화.
+
+    - 공백 제거: 한국어 띄어쓰기 변형 흡수 ("위험 평가" ↔ "위험평가")
+    - 조사·어미 제거: "경영진에게 보고" 와 "경영진 보고" 가 동등 매칭되도록
+      (키워드와 사용자 텍스트 양쪽에 동일하게 적용되므로 안전)
+    """
     if not isinstance(text, str):
         return ""
-    # 한국어는 띄어쓰기 변형이 잦으므로 공백을 제거하고 비교
-    return "".join(text.lower().split())
+    cleaned = "".join(text.lower().split())
+    cleaned = _PARTICLE_PATTERN.sub("", cleaned)
+    return cleaned
 
 
 def _aggregate_user_text(conversation_history: list[dict]) -> str:
@@ -304,7 +331,11 @@ def _strict_path_match(path: dict, user_text: str, ai_matched: list[str]) -> dic
         comps = path.get("compensating_keywords") or []
         comp_min = int(path.get("compensating_min") or 0)
         if comp_min <= 0:
-            comp_min = len(comps)  # 0=전체 충족
+            # 명시되지 않은 경우의 기본값: 정의된 키워드의 "절반 이상" (반올림 올림).
+            # 한국어 답변에서 모든 키워드를 정확히 등장시키는 것은 비현실적이라,
+            # 이전의 "전체 충족" 기본값을 완화해 자연스러운 모범답안이 통과하도록 합니다.
+            # (관리자가 더 엄격히 통제하고 싶다면 admin 페이지에서 명시 값을 입력)
+            comp_min = max(1, (len(comps) + 1) // 2) if comps else 0
         comp_count, comp_matched = _count_keyword_matches(comps, user_text)
         if comp_count < comp_min:
             return {

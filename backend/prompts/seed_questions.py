@@ -162,12 +162,12 @@ STAGE_1_QUESTIONS: list[dict[str, Any]] = [
                 "id": "full-event-and-periodic",
                 "tier": "full",
                 "description": "정기 + 이벤트 기반 + 경영진 보고 = 만점.",
-                "trigger_keywords": ["변경 시", "신규 서비스", "정기 평가", "위험 식별"],
+                "trigger_keywords": ["변경 시", "신규 서비스", "이벤트 기반", "정기 위험평가"],
                 "follow_up": (
                     "두 축의 위험평가 체계는 적절합니다. 식별된 위험에 대한 대응 우선순위와 "
                     "후속 조치 추적은 어떻게 하고 계십니까?"
                 ),
-                "compensating_keywords": ["우선순위", "후속 조치", "경영진 보고", "DoA"],
+                "compensating_keywords": ["우선순위", "경영진 보고", "DoA", "갱신"],
                 "exemplar_answer": (
                     "연 1회 정기 위험평가와 신규 서비스 도입·중대 변경 시점의 이벤트 기반 평가를 "
                     "병행 운영합니다. 식별된 위험은 영향도·발생가능성 기반 우선순위 매트릭스로 분류하고, "
