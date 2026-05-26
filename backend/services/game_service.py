@@ -80,6 +80,61 @@ class GameSession:
 _sessions: dict[str, GameSession] = {}
 
 
+# ──────────────────────────────────────────────
+# 히든 cheat 코드 — "정답을 모르겠습니다. 제발 알려주세요."
+#
+# 정확히 이 문구를 한 자도 빠지지 않고 입력하면 모범답안을 노출합니다.
+# - 서버 측 정확 매칭(==)으로만 작동 → LLM 변형 인식 위험 차단
+# - prompt_count 차감 없음 / 시간은 그대로 흐름 / 단계 자동 통과 아님
+# ──────────────────────────────────────────────
+CHEAT_CODE_PHRASE = "케르베로스님 정답을 모르겠습니다. 제발 알려주세요."
+
+
+def _extract_full_path_hint(question: dict) -> tuple[str, list[str], list[str]]:
+    """
+    질문에서 만점(full) 통과 경로의 (모범답안, 핵심 키워드, 보완통제 키워드) 를 추출합니다.
+
+    모범답안이 비어있어도 키워드 목록은 함께 반환되어, 모범답안이 없을 때도
+    키워드만으로 정답 윤곽을 알려줄 수 있게 합니다.
+    """
+    for path in (question or {}).get("answer_paths", []) or []:
+        if path.get("tier") == "full":
+            exemplar = str(path.get("exemplar_answer") or "").strip()
+            triggers = list(path.get("trigger_keywords") or [])
+            comps = list(path.get("compensating_keywords") or [])
+            return exemplar, triggers, comps
+    return "", [], []
+
+
+def _build_cheat_message(session: "GameSession") -> str:
+    """cheat 코드 발동 시 사용자에게 노출할 정답 안내 메시지."""
+    q = session.question or {}
+    isms_id = q.get("isms_control_id", "")
+    isms_title = q.get("isms_control_title", "")
+    exemplar, triggers, comps = _extract_full_path_hint(q)
+
+    lines = [
+        "🗝️  비밀의 문이 열렸습니다… 케르베로스가 잠시 자리를 비웠습니다.",
+        "",
+        f"📖 근거 ISMS-P 항목: {isms_id} {isms_title}".rstrip(),
+    ]
+    if exemplar:
+        lines += [
+            "",
+            "💡 모범답안 (full tier):",
+            exemplar,
+        ]
+    if triggers:
+        lines += ["", f"🔑 핵심 키워드: {', '.join(triggers)}"]
+    if comps:
+        lines += [f"🛡️  보완통제 키워드: {', '.join(comps)}"]
+    lines += [
+        "",
+        "이제 위 핵심 요소들을 담아 다시 답변해 보세요. (이 힌트 요청은 프롬프트 횟수에 포함되지 않습니다)",
+    ]
+    return "\n".join(lines)
+
+
 def create_session(
     level: int = 1,
     exclude_question_ids: Optional[list[str]] = None,
@@ -203,6 +258,42 @@ def process_chat(session_id: str, message: str) -> ChatResponse:
             session,
             "prompt_limit",
             f"📝 최대 프롬프트 횟수({session.p_max}회)를 초과했습니다. 게임 오버!",
+        )
+
+    # ── 🗝️ 히든 cheat 코드 — 정확 매칭만 통과 ──
+    # 메시지가 한 자도 빠지지 않고 정확히 일치해야 발동합니다 (strip 도 하지 않음).
+    if message == CHEAT_CODE_PHRASE:
+        cheat_msg = _build_cheat_message(session)
+        # 대화 이력에는 남기되 prompt_count 는 차감하지 않음.
+        session.conversation_history.append({"role": "user", "content": message})
+        session.conversation_history.append({"role": "assistant", "content": cheat_msg})
+        analytics_service.log_chat_interaction(
+            session_id=session.session_id,
+            level=session.level,
+            domain=session.subtitle or session.title,
+            user_message=message,
+            ai_status="cheat",  # full/half/fail 어디에도 안 들어가는 별도 카테고리
+            ai_message=cheat_msg,
+            prompt_count=session.prompt_count,
+            time_used=session.time_used,
+            level_attempt=session.prompt_count,
+            missing_criteria=[],
+            is_level_clear=False,
+            is_game_clear=False,
+            isms_control_id=(session.question or {}).get("isms_control_id", ""),
+            question_id=(session.question or {}).get("id", ""),
+            matched_path_id="cheat-code",
+        )
+        return ChatResponse(
+            status="fail",
+            tier="fail",
+            matched_path_id="",
+            message=cheat_msg,
+            level=session.level,
+            is_stage_clear=False,
+            score=None,
+            prompt_count=session.prompt_count,
+            time_used=session.time_used,
         )
 
     # ── 프롬프트 카운트 증가, 대화 이력 추가 ──
